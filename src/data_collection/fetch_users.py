@@ -1,6 +1,7 @@
 import json
 import os
 import time
+from datetime import datetime
 
 import requests
 from dotenv import load_dotenv
@@ -52,14 +53,23 @@ CZECH_KEYWORDS = [
     "jablonec nad nisou",
 ]
 
-# Maximum number of pages to fetch
-MAX_PAGES = 1
+# ===== PHASE 1: BULK FETCH CONFIGURATION =====
+# Fetch many users quickly without READMEs
+MAX_PAGES = 2  # Number of pages to fetch (USERS_PER_PAGE per page)
+USERS_PER_PAGE = 25  # Reduced to 25 for contributionsCollection reliability
+REPOS_PER_USER = 5  # Top repos per user (ordered by stars)
 
-# Number of users per page (max 100 allowed by GitHub API)
-USERS_PER_PAGE = 100
+# ===== PHASE 2: README FETCH CONFIGURATION =====
+# After ranking, fetch READMEs only for top users
+FETCH_READMES = False  # Set True only when fetching READMEs for top-ranked users
+TOP_N_USERS = 20  # Number of top-ranked users to enrich with READMEs
 
-# Delay between API requests (in seconds) to respect rate limits
-API_DELAY = 1
+# ===== API RATE LIMITING =====
+API_DELAY = 5  # Seconds between page requests (increased for contributionsCollection)
+README_DELAY = 0.5  # Seconds between README requests
+
+# ===== OUTPUT SETTINGS =====
+USE_TIMESTAMPED_FOLDER = True  # Create dated folder: data/raw/YYYYMMDD_HHMMSS/
 
 # ===================================
 
@@ -73,40 +83,69 @@ HEADERS = {
 }
 
 # The GraphQL query with pagination
-# This query searches for users and fetches their profile details and top repositories.
-GRAPHQL_QUERY = """
-query SearchUsers($query: String!, $first: Int!, $after: String) {
-    search(query: $query, type: USER, first: $first, after: $after) {
+#
+# HOW GITHUB SEARCH WORKS:
+# ------------------------
+# When searching for users (e.g., 15,107 users in Prague), GitHub returns them in a
+# specific order based on their internal ranking algorithm which considers:
+# 1. Best match score (how well the user matches the search criteria)
+# 2. Number of followers (more popular users ranked higher)
+# 3. Recent activity (more active users ranked higher)
+# 4. Repository count and quality
+#
+# This means the first 50 users you get are the "most relevant" or "most prominent"
+# users from that search, NOT random users or the first 50 who signed up.
+#
+# PAGINATION:
+# - Each page fetches USERS_PER_PAGE users (e.g., 50)
+# - For each user, we fetch their top REPOS_PER_USER repositories (ordered by stars)
+# - Use the 'after' cursor to get the next page
+# - Total users available: shown in 'userCount' field
+#
+GRAPHQL_QUERY = f"""
+query SearchUsers($query: String!, $first: Int!, $after: String) {{
+    search(query: $query, type: USER, first: $first, after: $after) {{
         userCount
-        pageInfo {
+        pageInfo {{
             endCursor
             hasNextPage
-        }
-        nodes {
-            ... on User {
+        }}
+        nodes {{
+            ... on User {{
                 login
                 name
                 bio
                 location
-                followers {
+                company
+                email
+                websiteUrl
+                followers {{
                     totalCount
-                }
-                repositories(first: 10, orderBy: {field: STARGAZERS, direction: DESC}, ownerAffiliations: OWNER) {
+                }}
+                contributionsCollection {{
+                    contributionCalendar {{
+                        totalContributions
+                    }}
+                }}
+                repositories(first: {REPOS_PER_USER}, orderBy: {{field: STARGAZERS, direction: DESC}}, ownerAffiliations: OWNER) {{
                     totalCount
-                    nodes {
+                    nodes {{
                         name
                         description
                         stargazerCount
                         forkCount
-                        primaryLanguage {
+                        url
+                        updatedAt
+                        pushedAt
+                        primaryLanguage {{
                             name
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
+                        }}
+                    }}
+                }}
+            }}
+        }}
+    }}
+}}
 """
 
 
@@ -121,6 +160,23 @@ def run_query(query, variables):
         raise Exception(
             f"Query failed to run by returning code of {request.status_code}. {request.text}"
         )
+
+
+def get_readme_content(owner, repo_name):
+    """Fetch README content using GitHub REST API."""
+    url = f"https://api.github.com/repos/{owner}/{repo_name}/readme"
+    headers = {
+        "Authorization": f"Bearer {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3.raw",
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            return response.text
+        return None
+    except Exception as e:
+        return None
 
 
 def build_search_query(keywords):
@@ -174,6 +230,31 @@ def fetch_all_users(search_query=None, max_pages=MAX_PAGES):
 
             print(f"  → Total matching users in GitHub: {user_count}")
 
+            # Fetch READMEs for each repository (if enabled)
+            if FETCH_READMES:
+                print(f"  → Fetching READMEs for repositories...")
+                readme_count = 0
+                for user in users:
+                    if (
+                        user
+                        and "repositories" in user
+                        and "nodes" in user["repositories"]
+                    ):
+                        for repo in user["repositories"]["nodes"]:
+                            if repo:
+                                readme_content = get_readme_content(
+                                    user["login"], repo["name"]
+                                )
+                                repo["readme_content"] = readme_content
+                                if readme_content:
+                                    readme_count += 1
+                                # Rate limiting
+                                time.sleep(README_DELAY)
+
+                print(f"  → Successfully fetched {readme_count} READMEs")
+            else:
+                print(f"  → Skipping README fetching (Phase 1: bulk fetch only)")
+
             all_users.extend(users)
 
             # Update pagination info
@@ -195,35 +276,119 @@ def fetch_all_users(search_query=None, max_pages=MAX_PAGES):
     return all_users
 
 
-def save_users_to_file(users, filename="github_users.json"):
+def save_users_to_file(users, filename="github_users.json", output_folder=None):
     """Saves the fetched users to a JSON file."""
-    # Build path relative to this script
-    output_path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "data", "raw", filename
+    # Determine output folder
+    base_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "raw")
+
+    if output_folder is None:
+        if USE_TIMESTAMPED_FOLDER:
+            # Create timestamped folder: YYYYMMDD_HHMMSS
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_folder = os.path.join(base_path, timestamp)
+        else:
+            output_folder = base_path
+
+    output_folder = os.path.abspath(output_folder)
+    os.makedirs(output_folder, exist_ok=True)
+
+    # Save file
+    output_path = os.path.join(output_folder, filename)
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(users, f, indent=2, ensure_ascii=False)
+
+    return output_path, output_folder
+
+
+def load_users_from_file(filepath):
+    """Load users from a JSON file."""
+    with open(filepath, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def fetch_readmes_for_users(users, output_folder):
+    """Fetch READMEs for a list of users and save to file."""
+    print(f"\n{'='*60}")
+    print(f"📚 Phase 2: Fetching READMEs for {len(users)} top-ranked users")
+    print(f"{'='*60}\n")
+
+    readme_count = 0
+    total_repos = sum(
+        len(user.get("repositories", {}).get("nodes", [])) for user in users
     )
-    output_path = os.path.abspath(output_path)
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+    for i, user in enumerate(users, 1):
+        print(f"Processing user {i}/{len(users)}: {user['login']}")
+
+        for repo in user.get("repositories", {}).get("nodes", []):
+            readme_content = get_readme_content(user["login"], repo["name"])
+            if readme_content:
+                repo["readme"] = readme_content
+                readme_count += 1
+            time.sleep(README_DELAY)
+
+    # Save enhanced users with READMEs
+    filename = f"phase2_top_{len(users)}_with_readmes.json"
+    output_path = os.path.join(output_folder, filename)
 
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(users, f, indent=4, ensure_ascii=False)
+        json.dump(users, f, indent=2, ensure_ascii=False)
 
-    print(f"\nData successfully saved to {output_path}")
+    print(f"\n📚 Fetched {readme_count}/{total_repos} READMEs")
+    print(f"✅ Saved to: {output_path}")
+    return output_path
 
 
 if __name__ == "__main__":
-    print("=" * 60)
-    print("GitHub Czech Users Fetcher")
-    print("=" * 60)
-    print(f"Using {len(CZECH_KEYWORDS)} location keywords")
-    print(f"Keywords: {', '.join(CZECH_KEYWORDS[:10])}...")
-    print("=" * 60)
-    print()
+    print(f"\n{'='*60}")
+    print("🚀 GitHub User Scraper - Two-Phase Strategy")
+    print(f"{'='*60}\n")
 
-    # Fetch Czech users - start with just Prague for testing
-    # users_data = fetch_all_users()  # Use all keywords
-    users_data = fetch_all_users(
-        search_query="location:prague"
-    )  # Test with single location
+    print("📋 Configuration:")
+    print(
+        f"  Phase 1: {MAX_PAGES} pages × {USERS_PER_PAGE} users = {MAX_PAGES * USERS_PER_PAGE} total users"
+    )
+    print(f"  Repos per user: {REPOS_PER_USER}")
+    print(
+        f"  README fetching: {'Enabled' if FETCH_READMES else 'Disabled (Phase 1 only)'}"
+    )
+    if not FETCH_READMES:
+        print(f"  Phase 2 target: Top {TOP_N_USERS} users for README enrichment")
+    print(f"  API delays: {API_DELAY}s (pages), {README_DELAY}s (READMEs)")
+    print(
+        f"  Output: {'Timestamped folder' if USE_TIMESTAMPED_FOLDER else 'data/raw/'}"
+    )
+    print(f"  Location: Prague (testing)")
+    print(f"{'='*60}\n")
 
-    # Save the data
-    save_users_to_file(users_data)
+    # Phase 1: Fetch users without READMEs
+    print(f"{'='*60}")
+    print("📥 Phase 1: Fetching user profiles (no READMEs)")
+    print(f"{'='*60}\n")
+
+    users_data = fetch_all_users(search_query="location:prague")
+
+    # Save Phase 1 results
+    output_path, output_folder = save_users_to_file(users_data, "phase1_all_users.json")
+
+    print(f"\n{'='*60}")
+    print(f"✅ Phase 1 Complete!")
+    print(f"   Users fetched: {len(users_data)}")
+    print(f"   Saved to: {output_path}")
+    print(f"   Folder: {output_folder}")
+    print(f"{'='*60}")
+
+    # Instructions for Phase 2
+    if not FETCH_READMES and len(users_data) > 0:
+        print(f"\n💡 Next Steps for Phase 2:")
+        print(f"   1. Rank the {len(users_data)} users using your custom formula")
+        print(f"   2. Select top {TOP_N_USERS} users")
+        print(f"   3. Use fetch_readmes_for_users() to enrich them with READMEs")
+        print(f"\n   Example:")
+        print(
+            f"   >>> from fetch_users import load_users_from_file, fetch_readmes_for_users"
+        )
+        print(f"   >>> users = load_users_from_file('{output_path}')")
+        print(f"   >>> top_users = users[:20]  # or use your ranking function")
+        print(f"   >>> fetch_readmes_for_users(top_users, '{output_folder}')")
+        print(f"\n{'='*60}")
