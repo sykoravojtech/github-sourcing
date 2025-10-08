@@ -30,16 +30,24 @@ import config
 # - Use the 'after' cursor to get the next page
 # - Total users available: shown in 'userCount' field
 #
-GRAPHQL_QUERY = f"""
-query SearchUsers($query: String!, $first: Int!, $after: String) {{
-    search(query: $query, type: USER, first: $first, after: $after) {{
+# LEAN QUERY: Only basic, cheap fields (~10-15 points per user)
+# Expensive fields (contributions, repos) fetched in Pass 2
+GRAPHQL_QUERY_LEAN = """
+query SearchUsers($query: String!, $first: Int!, $after: String) {
+    rateLimit {
+        cost
+        remaining
+        resetAt
+    }
+    search(query: $query, type: USER, first: $first, after: $after) {
         userCount
-        pageInfo {{
+        pageInfo {
             endCursor
             hasNextPage
-        }}
-        nodes {{
-            ... on User {{
+        }
+        nodes {
+            ... on User {
+                id
                 login
                 name
                 bio
@@ -47,33 +55,44 @@ query SearchUsers($query: String!, $first: Int!, $after: String) {{
                 company
                 email
                 websiteUrl
-                followers {{
+                followers {
                     totalCount
-                }}
-                contributionsCollection {{
-                    contributionCalendar {{
-                        totalContributions
-                    }}
-                }}
-                repositories(first: {config.REPOS_PER_USER}, orderBy: {{field: STARGAZERS, direction: DESC}}, ownerAffiliations: OWNER) {{
+                }
+                repositories {
                     totalCount
-                    nodes {{
-                        name
-                        description
-                        stargazerCount
-                        forkCount
-                        url
-                        updatedAt
-                        pushedAt
-                        primaryLanguage {{
-                            name
-                        }}
-                    }}
-                }}
-            }}
-        }}
-    }}
-}}
+                }
+            }
+        }
+    }
+}
+"""
+
+# PASS 2: Fetch contributions for specific users (batched)
+# Cost: ~200 points per user, but we only fetch for top N
+# Note: We build this dynamically with aliases, no variables needed
+GRAPHQL_QUERY_CONTRIBUTIONS_TEMPLATE = """
+query GetContributions {
+    rateLimit {
+        cost
+        remaining
+        resetAt
+    }
+    {{ALIASES}}
+}
+"""
+
+# PASS 2: Fetch repositories for specific users (batched)
+# Cost: ~20 points per repo × N repos per user
+# Note: We build this dynamically with aliases, no variables needed
+GRAPHQL_QUERY_REPOSITORIES_TEMPLATE = """
+query GetRepositories {
+    rateLimit {
+        cost
+        remaining
+        resetAt
+    }
+    {{ALIASES}}
+}
 """
 
 
@@ -224,6 +243,243 @@ def build_search_query(keywords):
     return " OR ".join(location_queries)
 
 
+def fetch_contributions_batch(users, from_date, to_date):
+    """
+    Fetch contributions for a batch of users (Pass 2).
+
+    Args:
+        users: List of user dicts with 'login' field
+        from_date: Start date (ISO format)
+        to_date: End date (ISO format)
+
+    Returns:
+        Dict mapping login -> contribution data
+    """
+    if not users:
+        return {}
+
+    # Build aliases for batched query
+    aliases = []
+    valid_users = []
+    for i, user in enumerate(users):
+        # Skip users without login
+        if not user or "login" not in user:
+            print(
+                f"    ⚠️  Skipping user {i}: missing login (keys: {user.keys() if user else 'None'})"
+            )
+            continue
+
+        login = user["login"]
+        valid_users.append(user)
+        # GraphQL aliases can't have special characters, use index
+        alias = f"user{i}"
+        aliases.append(
+            f"""
+            {alias}: user(login: "{login}") {{
+                login
+                contributionsCollection(from: "{from_date}", to: "{to_date}") {{
+                    contributionCalendar {{
+                        totalContributions
+                    }}
+                    restrictedContributionsCount
+                }}
+            }}
+        """
+        )
+
+    if not aliases:
+        print(f"    ⚠️  No valid users to fetch contributions for")
+        return {}
+
+    query = GRAPHQL_QUERY_CONTRIBUTIONS_TEMPLATE.replace(
+        "{{ALIASES}}", "\n".join(aliases)
+    )
+
+    try:
+        result = run_query(query, {})
+
+        # Log rate limit info
+        if "data" in result and "rateLimit" in result["data"]:
+            rate_limit = result["data"]["rateLimit"]
+            print(
+                f"  💰 Rate limit: {rate_limit['remaining']}/{rate_limit['cost']} points remaining, resets at {rate_limit['resetAt']}"
+            )
+
+        # Extract contributions data
+        contributions_map = {}
+        if "data" in result:
+            for i, user in enumerate(valid_users):
+                alias = f"user{i}"
+                if alias in result["data"] and result["data"][alias]:
+                    user_data = result["data"][alias]
+                    contributions_map[user["login"]] = user_data.get(
+                        "contributionsCollection", {}
+                    )
+
+        return contributions_map
+
+    except Exception as e:
+        print(f"  ⚠️  Error fetching contributions batch: {e}")
+        return {}
+
+
+def fetch_repositories_batch(users, repos_per_user=None):
+    """
+    Fetch repositories for a batch of users (Pass 2).
+
+    Args:
+        users: List of user dicts with 'login' field
+        repos_per_user: Number of repos to fetch per user
+
+    Returns:
+        Dict mapping login -> repositories data
+    """
+    if not users:
+        return {}
+
+    if repos_per_user is None:
+        repos_per_user = config.REPOS_PER_USER
+
+    # Build aliases for batched query
+    aliases = []
+    valid_users = []
+    for i, user in enumerate(users):
+        # Skip users without login
+        if not user or "login" not in user:
+            print(f"    ⚠️  Skipping user {i}: missing login")
+            continue
+
+        login = user["login"]
+        valid_users.append(user)
+        alias = f"user{i}"
+        pushed_at = "pushedAt" if config.FETCH_PUSHED_AT else ""
+        updated_at = "updatedAt" if config.FETCH_UPDATED_AT else ""
+
+        aliases.append(
+            f"""
+            {alias}: user(login: "{login}") {{
+                login
+                repositories(first: {repos_per_user}, orderBy: {{field: STARGAZERS, direction: DESC}}, ownerAffiliations: OWNER) {{
+                    totalCount
+                    nodes {{
+                        name
+                        description
+                        stargazerCount
+                        forkCount
+                        url
+                        {pushed_at}
+                        {updated_at}
+                        primaryLanguage {{
+                            name
+                        }}
+                    }}
+                }}
+            }}
+        """
+        )
+
+    if not aliases:
+        print(f"    ⚠️  No valid users to fetch repositories for")
+        return {}
+
+    query = GRAPHQL_QUERY_REPOSITORIES_TEMPLATE.replace(
+        "{{ALIASES}}", "\n".join(aliases)
+    )
+
+    try:
+        result = run_query(query, {})
+
+        # Log rate limit info
+        if "data" in result and "rateLimit" in result["data"]:
+            rate_limit = result["data"]["rateLimit"]
+            print(
+                f"  💰 Rate limit: {rate_limit['remaining']}/{rate_limit['cost']} points remaining, resets at {rate_limit['resetAt']}"
+            )
+
+        # Extract repositories data
+        repos_map = {}
+        if "data" in result:
+            for i, user in enumerate(valid_users):
+                alias = f"user{i}"
+                if alias in result["data"] and result["data"][alias]:
+                    user_data = result["data"][alias]
+                    repos_map[user["login"]] = user_data.get("repositories", {})
+
+        return repos_map
+
+    except Exception as e:
+        print(f"  ⚠️  Error fetching repositories batch: {e}")
+        return {}
+
+
+def enrich_users_with_expensive_data(users):
+    """
+    Pass 2: Fetch expensive fields (contributions, repos) for users in batches.
+
+    Args:
+        users: List of user dicts from Pass 1 (basic fields only)
+
+    Returns:
+        Enriched user list with contributions and repositories
+    """
+    from datetime import datetime, timedelta
+
+    print(
+        f"\n📊 Pass 2: Enriching {len(users)} users with contributions and repositories..."
+    )
+
+    # Calculate time window for contributions
+    to_date = datetime.now()
+    from_date = to_date - timedelta(days=config.CONTRIBUTIONS_FROM_DAYS_AGO)
+    from_iso = from_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+    to_iso = to_date.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Batch fetch contributions
+    if not config.FETCH_CONTRIBUTIONS_IN_SEARCH:
+        print(
+            f"  → Fetching contributions (batches of {config.CONTRIBUTIONS_BATCH_SIZE})..."
+        )
+        for i in range(0, len(users), config.CONTRIBUTIONS_BATCH_SIZE):
+            batch = users[i : i + config.CONTRIBUTIONS_BATCH_SIZE]
+            print(
+                f"    Batch {i//config.CONTRIBUTIONS_BATCH_SIZE + 1}/{(len(users)-1)//config.CONTRIBUTIONS_BATCH_SIZE + 1} ({len(batch)} users)..."
+            )
+
+            contributions_map = fetch_contributions_batch(batch, from_iso, to_iso)
+
+            # Merge contributions into user data
+            for user in batch:
+                if user and "login" in user and user["login"] in contributions_map:
+                    user["contributionsCollection"] = contributions_map[user["login"]]
+
+            # Rate limiting
+            time.sleep(config.API_DELAY)
+
+    # Batch fetch repositories
+    if not config.FETCH_REPOSITORIES_IN_SEARCH:
+        print(
+            f"  → Fetching repositories (batches of {config.REPOSITORIES_BATCH_SIZE})..."
+        )
+        for i in range(0, len(users), config.REPOSITORIES_BATCH_SIZE):
+            batch = users[i : i + config.REPOSITORIES_BATCH_SIZE]
+            print(
+                f"    Batch {i//config.REPOSITORIES_BATCH_SIZE + 1}/{(len(users)-1)//config.REPOSITORIES_BATCH_SIZE + 1} ({len(batch)} users)..."
+            )
+
+            repos_map = fetch_repositories_batch(batch)
+
+            # Merge repositories into user data
+            for user in batch:
+                if user and "login" in user and user["login"] in repos_map:
+                    user["repositories"] = repos_map[user["login"]]
+
+            # Rate limiting
+            time.sleep(config.API_DELAY)
+
+    print(f"  ✅ Enrichment complete!\n")
+    return users
+
+
 def fetch_all_users(search_query=None, max_pages=None):
     """Fetches all users matching the location query, handling pagination."""
     if max_pages is None:
@@ -251,12 +507,19 @@ def fetch_all_users(search_query=None, max_pages=None):
 
         try:
             print(f"Fetching page {page_count + 1}...")
-            result = run_query(GRAPHQL_QUERY, variables)
+            result = run_query(GRAPHQL_QUERY_LEAN, variables)
 
             # Check for errors
             if "errors" in result:
                 print("Error in GraphQL query:", result["errors"])
                 break
+
+            # Log rate limit info
+            if "data" in result and "rateLimit" in result["data"]:
+                rate_limit = result["data"]["rateLimit"]
+                print(
+                    f"  💰 Query cost: {rate_limit['cost']} points, {rate_limit['remaining']} remaining"
+                )
 
             # Extract data
             search_data = result.get("data", {}).get("search", {})
@@ -308,7 +571,15 @@ def fetch_all_users(search_query=None, max_pages=None):
             print(f"Error fetching users: {e}")
             break
 
-    print(f"\nTotal users fetched: {len(all_users)}")
+    print(f"\nTotal users fetched (Pass 1): {len(all_users)}")
+
+    # Pass 2: Enrich with expensive fields if needed
+    if all_users and (
+        not config.FETCH_CONTRIBUTIONS_IN_SEARCH
+        or not config.FETCH_REPOSITORIES_IN_SEARCH
+    ):
+        all_users = enrich_users_with_expensive_data(all_users)
+
     return all_users
 
 

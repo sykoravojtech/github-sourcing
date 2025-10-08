@@ -107,8 +107,28 @@ def rank_users(users: List[Dict], top_n: int = None) -> List[Dict]:
     for user in users:
         user["ranking_score"] = calculate_user_score(user, users)
 
+    # Filter out users with insufficient contributions
+    active_users = []
+    filtered_count = 0
+    for user in users:
+        contributions = (
+            user.get("contributionsCollection", {})
+            .get("contributionCalendar", {})
+            .get("totalContributions", 0)
+        )
+        if contributions >= config.MIN_CONTRIBUTIONS_REQUIRED:
+            active_users.append(user)
+        else:
+            filtered_count += 1
+
+    if filtered_count > 0:
+        print(
+            f"🔍 Filtered out {filtered_count} users with < {config.MIN_CONTRIBUTIONS_REQUIRED} contributions in the last year"
+        )
+        print(f"📊 Active users remaining: {len(active_users)}\n")
+
     # Sort by score (descending)
-    ranked = sorted(users, key=lambda u: u["ranking_score"], reverse=True)
+    ranked = sorted(active_users, key=lambda u: u["ranking_score"], reverse=True)
 
     # Print top N (from config)
     display_count = min(config.DISPLAY_TOP_N, len(ranked))
