@@ -1,86 +1,14 @@
 import json
 import os
+import sys
 import time
 from datetime import datetime
 
 import requests
-from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
-
-# ========== CONFIGURATION ==========
-# Your GitHub Personal Access Token
-GITHUB_TOKEN = os.getenv("GITHUB_API_TOKEN")
-if not GITHUB_TOKEN:
-    raise ValueError("GitHub API token not found. Please set it in the .env file.")
-
-# Czech location keywords for user identification
-# GitHub search is case-insensitive, so we use lowercase for consistency
-CZECH_KEYWORDS = [
-    "czechia",
-    "czech republic",
-    "the czech republic",
-    "czech",
-    "cesko",
-    "česko",
-    "cz",
-    "prague",
-    "praha",
-    "brno",
-    "ostrava",
-    "plzen",
-    "plzeň",
-    "liberec",
-    "olomouc",
-    "ústí nad labem",
-    "české budějovice",
-    "hradec králové",
-    "pardubice",
-    "zlín",
-    "havířov",
-    "kladno",
-    "most",
-    "opava",
-    "frýdek-místek",
-    "karviná",
-    "jihlava",
-    "teplice",
-    "děčín",
-    "karlovy vary",
-    "chomutov",
-    "přerov",
-    "jablonec nad nisou",
-]
-
-# ===== PHASE 1: BULK FETCH CONFIGURATION =====
-# Fetch many users quickly without READMEs
-MAX_PAGES = 2  # Number of pages to fetch (USERS_PER_PAGE per page)
-USERS_PER_PAGE = 25  # Reduced to 25 for contributionsCollection reliability
-REPOS_PER_USER = 5  # Top repos per user (ordered by stars)
-
-# ===== PHASE 2: README FETCH CONFIGURATION =====
-# After ranking, fetch READMEs only for top users
-FETCH_READMES = False  # Set True only when fetching READMEs for top-ranked users
-TOP_N_USERS = 20  # Number of top-ranked users to enrich with READMEs
-
-# ===== API RATE LIMITING =====
-API_DELAY = 5  # Seconds between page requests (increased for contributionsCollection)
-README_DELAY = 0.5  # Seconds between README requests
-
-# ===== OUTPUT SETTINGS =====
-USE_TIMESTAMPED_FOLDER = True  # Create dated folder: data/raw/YYYYMMDD_HHMMSS/
-
-# ===================================
-
-# The GraphQL API endpoint
-URL = "https://api.github.com/graphql"
-
-# Headers for the API request, including authorization
-HEADERS = {
-    "Authorization": f"bearer {GITHUB_TOKEN}",
-    "Content-Type": "application/json",
-}
+# Add parent directory to path to import config
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+import config
 
 # The GraphQL query with pagination
 #
@@ -127,7 +55,7 @@ query SearchUsers($query: String!, $first: Int!, $after: String) {{
                         totalContributions
                     }}
                 }}
-                repositories(first: {REPOS_PER_USER}, orderBy: {{field: STARGAZERS, direction: DESC}}, ownerAffiliations: OWNER) {{
+                repositories(first: {config.REPOS_PER_USER}, orderBy: {{field: STARGAZERS, direction: DESC}}, ownerAffiliations: OWNER) {{
                     totalCount
                     nodes {{
                         name
@@ -149,29 +77,134 @@ query SearchUsers($query: String!, $first: Int!, $after: String) {{
 """
 
 
-def run_query(query, variables):
-    """A simple function to use requests.post to make the API call."""
-    request = requests.post(
-        URL, json={"query": query, "variables": variables}, headers=HEADERS
-    )
-    if request.status_code == 200:
-        return request.json()
-    else:
-        raise Exception(
-            f"Query failed to run by returning code of {request.status_code}. {request.text}"
-        )
+def run_query(query, variables, max_retries=None, base_delay=None):
+    """
+    Execute GraphQL query with retry logic for 502 errors.
+
+    Args:
+        query: GraphQL query string
+        variables: Query variables
+        max_retries: Maximum number of retry attempts (default from config)
+        base_delay: Base delay in seconds (default from config)
+
+    Returns:
+        JSON response from GitHub API
+
+    Raises:
+        Exception: If all retries fail
+    """
+    if max_retries is None:
+        max_retries = config.MAX_RETRIES
+    if base_delay is None:
+        base_delay = config.RETRY_BASE_DELAY
+
+    current_delay = base_delay
+
+    for attempt in range(max_retries):
+        try:
+            request = requests.post(
+                config.GRAPHQL_URL,
+                json={"query": query, "variables": variables},
+                headers=config.get_headers(),
+                timeout=config.REQUEST_TIMEOUT,
+            )
+
+            if request.status_code == 200:
+                return request.json()
+            elif request.status_code == 502:
+                # 502 Bad Gateway - retry with increased delay
+                if attempt < max_retries - 1:
+                    print(
+                        f"  ⚠️  Got 502 error, retrying in {current_delay}s (attempt {attempt + 1}/{max_retries})..."
+                    )
+                    time.sleep(current_delay)
+                    current_delay += config.RETRY_BACKOFF_INCREMENT
+                    continue
+                else:
+                    raise Exception(
+                        f"Query failed after {max_retries} attempts with 502 errors"
+                    )
+            else:
+                raise Exception(
+                    f"Query failed to run by returning code of {request.status_code}. {request.text}"
+                )
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                print(f"  ⚠️  Request error: {e}, retrying in {current_delay}s...")
+                time.sleep(current_delay)
+                current_delay += config.RETRY_BACKOFF_INCREMENT
+                continue
+            else:
+                raise
+
+    raise Exception(f"Query failed after {max_retries} attempts")
+
+
+def run_query_old(query, variables, max_retries=3, base_delay=config.API_DELAY):
+    """
+    Execute GraphQL query with retry logic for 502 errors.
+
+    Args:
+        query: GraphQL query string
+        variables: Query variables
+        max_retries: Maximum number of retry attempts
+        base_delay: Base delay in seconds (increases with each retry)
+
+    Returns:
+        JSON response from GitHub API
+
+    Raises:
+        Exception: If all retries fail
+    """
+    current_delay = base_delay
+
+    for attempt in range(max_retries):
+        try:
+            request = requests.post(
+                config.GRAPHQL_URL,
+                json={"query": query, "variables": variables},
+                headers=config.get_headers(),
+            )
+
+            if request.status_code == 200:
+                return request.json()
+            elif request.status_code == 502:
+                # 502 Bad Gateway - retry with increased delay
+                if attempt < max_retries - 1:
+                    print(
+                        f"  ⚠️  Got 502 error, retrying in {current_delay}s (attempt {attempt + 1}/{max_retries})..."
+                    )
+                    time.sleep(current_delay)
+                    current_delay += 2  # Increase delay by 2 seconds each retry
+                    continue
+                else:
+                    raise Exception(
+                        f"Query failed after {max_retries} attempts with 502 errors"
+                    )
+            else:
+                raise Exception(
+                    f"Query failed to run by returning code of {request.status_code}. {request.text}"
+                )
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                print(f"  ⚠️  Request error: {e}, retrying in {current_delay}s...")
+                time.sleep(current_delay)
+                current_delay += 2
+                continue
+            else:
+                raise
+
+    raise Exception(f"Query failed after {max_retries} attempts")
 
 
 def get_readme_content(owner, repo_name):
     """Fetch README content using GitHub REST API."""
-    url = f"https://api.github.com/repos/{owner}/{repo_name}/readme"
-    headers = {
-        "Authorization": f"Bearer {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3.raw",
-    }
+    url = f"{config.REST_API_BASE}/repos/{owner}/{repo_name}/readme"
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(
+            url, headers=config.get_rest_headers(), timeout=config.REQUEST_TIMEOUT
+        )
         if response.status_code == 200:
             return response.text
         return None
@@ -191,10 +224,13 @@ def build_search_query(keywords):
     return " OR ".join(location_queries)
 
 
-def fetch_all_users(search_query=None, max_pages=MAX_PAGES):
+def fetch_all_users(search_query=None, max_pages=None):
     """Fetches all users matching the location query, handling pagination."""
+    if max_pages is None:
+        max_pages = config.MAX_PAGES
+
     if search_query is None:
-        search_query = build_search_query(CZECH_KEYWORDS)
+        search_query = build_search_query(config.CZECH_KEYWORDS)
 
     all_users = []
     has_next_page = True
@@ -203,13 +239,13 @@ def fetch_all_users(search_query=None, max_pages=MAX_PAGES):
 
     print(f"Search query: {search_query[:200]}...")  # Print first 200 chars
     print(
-        f"Max pages to fetch: {max_pages} (up to {max_pages * USERS_PER_PAGE} users)\n"
+        f"Max pages to fetch: {max_pages} (up to {max_pages * config.USERS_PER_PAGE} users)\n"
     )
 
     while has_next_page and page_count < max_pages:
         variables = {
             "query": search_query,
-            "first": USERS_PER_PAGE,
+            "first": config.USERS_PER_PAGE,
             "after": after_cursor,
         }
 
@@ -231,7 +267,7 @@ def fetch_all_users(search_query=None, max_pages=MAX_PAGES):
             print(f"  → Total matching users in GitHub: {user_count}")
 
             # Fetch READMEs for each repository (if enabled)
-            if FETCH_READMES:
+            if config.FETCH_READMES:
                 print(f"  → Fetching READMEs for repositories...")
                 readme_count = 0
                 for user in users:
@@ -249,7 +285,7 @@ def fetch_all_users(search_query=None, max_pages=MAX_PAGES):
                                 if readme_content:
                                     readme_count += 1
                                 # Rate limiting
-                                time.sleep(README_DELAY)
+                                time.sleep(config.README_DELAY)
 
                 print(f"  → Successfully fetched {readme_count} READMEs")
             else:
@@ -266,7 +302,7 @@ def fetch_all_users(search_query=None, max_pages=MAX_PAGES):
             page_count += 1
 
             # Rate limiting: Respect API rate limits
-            time.sleep(API_DELAY)
+            time.sleep(config.API_DELAY)
 
         except Exception as e:
             print(f"Error fetching users: {e}")
@@ -282,7 +318,7 @@ def save_users_to_file(users, filename="github_users.json", output_folder=None):
     base_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "raw")
 
     if output_folder is None:
-        if USE_TIMESTAMPED_FOLDER:
+        if config.USE_TIMESTAMPED_FOLDER:
             # Create timestamped folder: YYYYMMDD_HHMMSS
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_folder = os.path.join(base_path, timestamp)
@@ -295,48 +331,11 @@ def save_users_to_file(users, filename="github_users.json", output_folder=None):
     # Save file
     output_path = os.path.join(output_folder, filename)
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(users, f, indent=2, ensure_ascii=False)
+        json.dump(
+            users, f, indent=config.JSON_INDENT, ensure_ascii=config.JSON_ENSURE_ASCII
+        )
 
     return output_path, output_folder
-
-
-def load_users_from_file(filepath):
-    """Load users from a JSON file."""
-    with open(filepath, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def fetch_readmes_for_users(users, output_folder):
-    """Fetch READMEs for a list of users and save to file."""
-    print(f"\n{'='*60}")
-    print(f"📚 Phase 2: Fetching READMEs for {len(users)} top-ranked users")
-    print(f"{'='*60}\n")
-
-    readme_count = 0
-    total_repos = sum(
-        len(user.get("repositories", {}).get("nodes", [])) for user in users
-    )
-
-    for i, user in enumerate(users, 1):
-        print(f"Processing user {i}/{len(users)}: {user['login']}")
-
-        for repo in user.get("repositories", {}).get("nodes", []):
-            readme_content = get_readme_content(user["login"], repo["name"])
-            if readme_content:
-                repo["readme"] = readme_content
-                readme_count += 1
-            time.sleep(README_DELAY)
-
-    # Save enhanced users with READMEs
-    filename = f"phase2_top_{len(users)}_with_readmes.json"
-    output_path = os.path.join(output_folder, filename)
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(users, f, indent=2, ensure_ascii=False)
-
-    print(f"\n📚 Fetched {readme_count}/{total_repos} READMEs")
-    print(f"✅ Saved to: {output_path}")
-    return output_path
 
 
 if __name__ == "__main__":
@@ -346,17 +345,19 @@ if __name__ == "__main__":
 
     print("📋 Configuration:")
     print(
-        f"  Phase 1: {MAX_PAGES} pages × {USERS_PER_PAGE} users = {MAX_PAGES * USERS_PER_PAGE} total users"
+        f"  Phase 1: {config.MAX_PAGES} pages × {config.USERS_PER_PAGE} users = {config.MAX_PAGES * config.USERS_PER_PAGE} total users"
     )
-    print(f"  Repos per user: {REPOS_PER_USER}")
+    print(f"  Repos per user: {config.REPOS_PER_USER}")
     print(
-        f"  README fetching: {'Enabled' if FETCH_READMES else 'Disabled (Phase 1 only)'}"
+        f"  README fetching: {'Enabled' if config.FETCH_READMES else 'Disabled (Phase 1 only)'}"
     )
-    if not FETCH_READMES:
-        print(f"  Phase 2 target: Top {TOP_N_USERS} users for README enrichment")
-    print(f"  API delays: {API_DELAY}s (pages), {README_DELAY}s (READMEs)")
+    if not config.FETCH_READMES:
+        print(f"  Phase 2 target: Top {config.TOP_N_USERS} users for README enrichment")
     print(
-        f"  Output: {'Timestamped folder' if USE_TIMESTAMPED_FOLDER else 'data/raw/'}"
+        f"  API delays: {config.API_DELAY}s (pages), {config.README_DELAY}s (READMEs)"
+    )
+    print(
+        f"  Output: {'Timestamped folder' if config.USE_TIMESTAMPED_FOLDER else 'data/raw/'}"
     )
     print(f"  Location: Prague (testing)")
     print(f"{'='*60}\n")
@@ -379,16 +380,17 @@ if __name__ == "__main__":
     print(f"{'='*60}")
 
     # Instructions for Phase 2
-    if not FETCH_READMES and len(users_data) > 0:
+    if not config.FETCH_READMES and len(users_data) > 0:
         print(f"\n💡 Next Steps for Phase 2:")
-        print(f"   1. Rank the {len(users_data)} users using your custom formula")
-        print(f"   2. Select top {TOP_N_USERS} users")
-        print(f"   3. Use fetch_readmes_for_users() to enrich them with READMEs")
-        print(f"\n   Example:")
         print(
-            f"   >>> from fetch_users import load_users_from_file, fetch_readmes_for_users"
+            f"   1. Rank users: python src/processing/rank_users.py {output_path} {config.TOP_N_USERS}"
         )
-        print(f"   >>> users = load_users_from_file('{output_path}')")
-        print(f"   >>> top_users = users[:20]  # or use your ranking function")
-        print(f"   >>> fetch_readmes_for_users(top_users, '{output_folder}')")
+        print(
+            f"   2. Fetch READMEs: python src/data_collection/fetch_readmes.py <ranked_file>"
+        )
+        print(f"\n   Full workflow:")
+        print(f"   uv run python src/processing/rank_users.py \\")
+        print(f"     {output_path} {config.TOP_N_USERS}")
+        print(f"   uv run python src/data_collection/fetch_readmes.py \\")
+        print(f"     {output_folder}/phase2_ranked_top_{config.TOP_N_USERS}.json")
         print(f"\n{'='*60}")

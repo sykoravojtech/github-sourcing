@@ -4,8 +4,14 @@ Identifies top developers for recruitment/sourcing.
 """
 
 import json
+import os
+import sys
 from datetime import datetime
 from typing import Dict, List
+
+# Add parent directory to path to import config
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+import config
 
 
 def parse_datetime(dt_string):
@@ -29,44 +35,37 @@ def calculate_user_score(user: Dict, all_users: List[Dict] = None) -> float:
     """
     Calculate ranking score for a user (0-100 scale).
 
-    Weighted Scoring System:
-    - Followers: 20%
-    - Contributions (last year): 35%
-    - Total stars: 25%
-    - Public repos: 10%
-    - Activity (last 30 days): 10%
-
+    Uses weights and thresholds from config module.
     Each metric is normalized to 0-100 before applying weights.
     Total possible: 100 points
     """
     repos = user.get("repositories", {}).get("nodes", [])
 
-    # ===== 1. FOLLOWERS (20% weight) =====
-    followers = user.get("followers", {}).get("totalCount", 0)
-    # Normalize: 1000+ followers = 100 points
-    followers_score = min(100, (followers / 1000) * 100)
+    # Get weights and thresholds from config
+    weights = config.SCORING_WEIGHTS
+    thresholds = config.SCORING_THRESHOLDS
 
-    # ===== 2. CONTRIBUTIONS LAST YEAR (35% weight) =====
-    # Get actual contributions from GitHub's contributionsCollection
+    # ===== 1. FOLLOWERS =====
+    followers = user.get("followers", {}).get("totalCount", 0)
+    followers_score = min(100, (followers / thresholds["followers"]) * 100)
+
+    # ===== 2. CONTRIBUTIONS LAST YEAR =====
     contributions = 0
     contrib_data = user.get("contributionsCollection", {})
     if contrib_data:
         calendar = contrib_data.get("contributionCalendar", {})
         contributions = calendar.get("totalContributions", 0)
-    # Normalize: 1000+ contributions = 100 points
-    contributions_score = min(100, (contributions / 1000) * 100)
+    contributions_score = min(100, (contributions / thresholds["contributions"]) * 100)
 
-    # ===== 3. TOTAL STARS (25% weight) =====
+    # ===== 3. TOTAL STARS =====
     total_stars = sum(repo.get("stargazerCount", 0) for repo in repos)
-    # Normalize: 1000+ stars = 100 points
-    stars_score = min(100, (total_stars / 1000) * 100)
+    stars_score = min(100, (total_stars / thresholds["stars"]) * 100)
 
-    # ===== 4. PUBLIC REPOS (10% weight) =====
+    # ===== 4. PUBLIC REPOS =====
     total_repos = user.get("repositories", {}).get("totalCount", 0)
-    # Normalize: 50+ repos = 100 points
-    repos_score = min(100, (total_repos / 50) * 100)
+    repos_score = min(100, (total_repos / thresholds["repos"]) * 100)
 
-    # ===== 5. ACTIVITY LAST 30 DAYS (10% weight) =====
+    # ===== 5. ACTIVITY LAST 30 DAYS =====
     has_recent_activity = False
     for repo in repos:
         pushed_at = parse_datetime(repo.get("pushedAt"))
@@ -79,11 +78,11 @@ def calculate_user_score(user: Dict, all_users: List[Dict] = None) -> float:
 
     # ===== WEIGHTED TOTAL (0-100) =====
     total_score = (
-        followers_score * 0.20
-        + contributions_score * 0.35
-        + stars_score * 0.25
-        + repos_score * 0.10
-        + activity_score * 0.10
+        followers_score * weights["followers"]
+        + contributions_score * weights["contributions"]
+        + stars_score * weights["stars"]
+        + repos_score * weights["repos"]
+        + activity_score * weights["activity"]
     )
 
     return round(total_score, 2)
@@ -111,14 +110,15 @@ def rank_users(users: List[Dict], top_n: int = None) -> List[Dict]:
     # Sort by score (descending)
     ranked = sorted(users, key=lambda u: u["ranking_score"], reverse=True)
 
-    # Print top 10
-    print("🏆 Top 10 Users (Score 0-100):")
+    # Print top N (from config)
+    display_count = min(config.DISPLAY_TOP_N, len(ranked))
+    print(f"🏆 Top {display_count} Users (Score 0-100):")
     print(
         f"{'Rank':<6} {'Score':<8} {'Login':<20} {'Followers':<10} {'Contrib':<10} {'Stars':<8}"
     )
-    print("-" * 70)
+    print("-" * config.SEPARATOR_LENGTH)
 
-    for i, user in enumerate(ranked[:10], 1):
+    for i, user in enumerate(ranked[:display_count], 1):
         login = user.get("login", "N/A")
         score = user.get("ranking_score", 0)
         followers = user.get("followers", {}).get("totalCount", 0)
@@ -146,7 +146,9 @@ def rank_users(users: List[Dict], top_n: int = None) -> List[Dict]:
 def save_ranked_users(users: List[Dict], output_path: str):
     """Save ranked users to JSON file."""
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(users, f, indent=2, ensure_ascii=False)
+        json.dump(
+            users, f, indent=config.JSON_INDENT, ensure_ascii=config.JSON_ENSURE_ASCII
+        )
     print(f"✅ Saved {len(users)} ranked users to: {output_path}")
 
 
