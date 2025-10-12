@@ -58,8 +58,31 @@ CZECH_KEYWORDS = [
     "jablonec nad nisou",
 ]
 
+
+def build_czech_location_query():
+    """
+    Build a GitHub search query using all Czech location keywords.
+
+    Returns a query string like:
+    location:"czechia" OR location:"czech republic" OR location:"prague" OR ...
+
+    Usage:
+        query = build_czech_location_query()
+        users = fetch_all_users(search_query=query)
+    """
+    # Quote keywords that contain spaces, leave others as-is
+    quoted_keywords = [
+        f'location:"{keyword}"' if " " in keyword else f"location:{keyword}"
+        for keyword in CZECH_KEYWORDS
+    ]
+    return " OR ".join(quoted_keywords)
+
+
 # Default search location (can be overridden in main.py)
-DEFAULT_LOCATION = "location:prague"
+# Use ALL 33 Czech keywords for broadest search
+# DEFAULT_LOCATION = build_czech_location_query()  # All Czech locations
+DEFAULT_LOCATION = "location:prague"  # Single city (most focused)
+# DEFAULT_LOCATION = "location:czechia OR location:czech OR location:praha OR location:brno OR location:ostrava"  # Major cities
 
 # ========== PHASE 1: BULK FETCH CONFIGURATION ==========
 # Number of pages to fetch (each page has USERS_PER_PAGE users)

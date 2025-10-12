@@ -95,12 +95,12 @@ def fetch_readmes_for_users(users, output_folder):
             # URL format: https://github.com/owner/repo
             owner = login  # Default to user's login
             is_fork = repo.get("isFork", False)
-            
+
             if repo_url and "github.com/" in repo_url:
                 parts = repo_url.split("github.com/")[-1].split("/")
                 if len(parts) >= 2:
                     owner = parts[0]  # Actual repo owner
-                    
+
             # Warn if fetching README from someone else's repo (fork)
             if verbose and owner != login:
                 print(f"    ⚠️  {repo_name}: Fork of {owner}'s repo")

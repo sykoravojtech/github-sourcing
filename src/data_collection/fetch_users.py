@@ -357,7 +357,7 @@ def fetch_repositories_batch(users, repos_per_user=None):
 
         # Build repository filter based on config
         fork_filter = ", isFork: false" if config.EXCLUDE_FORKS else ""
-        
+
         aliases.append(
             f"""
             {alias}: user(login: "{login}") {{
