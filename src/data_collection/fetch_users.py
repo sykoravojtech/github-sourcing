@@ -355,17 +355,21 @@ def fetch_repositories_batch(users, repos_per_user=None):
         pushed_at = "pushedAt" if config.FETCH_PUSHED_AT else ""
         updated_at = "updatedAt" if config.FETCH_UPDATED_AT else ""
 
+        # Build repository filter based on config
+        fork_filter = ", isFork: false" if config.EXCLUDE_FORKS else ""
+        
         aliases.append(
             f"""
             {alias}: user(login: "{login}") {{
                 login
-                repositories(first: {repos_per_user}, orderBy: {{field: STARGAZERS, direction: DESC}}, ownerAffiliations: OWNER) {{
+                repositories(first: {repos_per_user}, orderBy: {{field: STARGAZERS, direction: DESC}}, ownerAffiliations: OWNER{fork_filter}) {{
                     totalCount
                     nodes {{
                         name
                         description
                         stargazerCount
                         forkCount
+                        isFork
                         url
                         {pushed_at}
                         {updated_at}

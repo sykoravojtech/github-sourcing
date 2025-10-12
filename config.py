@@ -166,6 +166,12 @@ USE_EMOJI = True  # Set False for plain text output
 # ========== ADVANCED SETTINGS ==========
 # These generally don't need to be changed
 
+# ========== REPOSITORY FILTERING ==========
+# Whether to exclude forked repositories from analysis
+# TRUE = Only original work (recommended for talent sourcing)
+# FALSE = Include forks (may credit users for others' work)
+EXCLUDE_FORKS = True  # Only count repositories the user actually created
+
 # ========== TWO-PASS STRATEGY ==========
 # To avoid GitHub's 5,000 point/hour complexity limit:
 # Pass 1: Fetch only cheap fields (id, login, basic info)
