@@ -82,7 +82,7 @@ FETCH_READMES = False
 # ========== PHASE 2: RANKING CONFIGURATION ==========
 # Number of top-ranked users to select for README enrichment
 # This is the default, can be overridden in main.py with --top-n
-TOP_N_USERS = 50
+TOP_N_USERS = 20
 
 # Scoring weights (must sum to 1.0)
 # Adjust these to change ranking priorities
@@ -175,12 +175,14 @@ USE_EMOJI = True  # Set False for plain text output
 # FALSE = Two-pass approach (recommended, avoids complexity limits)
 # TRUE = Single-pass (may hit RESOURCE_LIMITS_EXCEEDED on large queries)
 FETCH_CONTRIBUTIONS_IN_SEARCH = False  # Expensive! ~200 points per user
-FETCH_REPOSITORIES_IN_SEARCH = False   # Moderately expensive: ~20 points per repo × N repos
+FETCH_REPOSITORIES_IN_SEARCH = (
+    False  # Moderately expensive: ~20 points per repo × N repos
+)
 
 # Pass 2: Batch size for fetching contributions/repos separately
 # GitHub allows up to 100 nodes per query, but 20-50 is safer
 CONTRIBUTIONS_BATCH_SIZE = 25  # Users per batch when fetching contributions
-REPOSITORIES_BATCH_SIZE = 25   # Users per batch when fetching repositories
+REPOSITORIES_BATCH_SIZE = 25  # Users per batch when fetching repositories
 
 # Contribution time window (for Pass 2)
 # GitHub limits to 1 year maximum
@@ -253,12 +255,12 @@ def print_config_summary():
     # Authentication
     print("� Authentication:")
     print(f"  • GitHub Token: {'✅ Set' if GITHUB_TOKEN else '❌ Missing'}")
-    
+
     # Search Configuration
     print("\n🔍 Search Configuration:")
     print(f"  • Default location: {DEFAULT_LOCATION}")
     print(f"  • Czech keywords: {len(CZECH_KEYWORDS)} locations")
-    
+
     # Phase 1: Fetch
     print("\n�📥 Phase 1 (Fetch):")
     print(f"  • Max pages: {MAX_PAGES}")
@@ -290,7 +292,9 @@ def print_config_summary():
     print(f"  • Max retries: {MAX_RETRIES}")
     print(f"  • Retry base delay: {RETRY_BASE_DELAY}s")
     print(f"  • Retry backoff increment: {RETRY_BACKOFF_INCREMENT}s")
-    retry_delays = [RETRY_BASE_DELAY + (i * RETRY_BACKOFF_INCREMENT) for i in range(MAX_RETRIES)]
+    retry_delays = [
+        RETRY_BASE_DELAY + (i * RETRY_BACKOFF_INCREMENT) for i in range(MAX_RETRIES)
+    ]
     print(f"  • Retry pattern: {' → '.join(f'{d}s' for d in retry_delays)}")
 
     # Output Configuration
