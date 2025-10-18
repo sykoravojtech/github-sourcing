@@ -94,7 +94,7 @@ class VectorSearchCLI:
 
         while True:
             try:
-                query = input("Search query: ").strip()
+                query = input("Search query (or 'quit'): ").strip()
 
                 if not query:
                     continue
