@@ -145,8 +145,8 @@ Write 3 specific reasons. Each reason should mention a specific repository or te
             response_text = completion.choices[0].message.content.strip()
 
             # Debug: Print the raw response
-            print(f"[DEBUG] LLM response for @{login}:")
-            print(f"[DEBUG] {response_text[:300]}...")
+            # print(f"[DEBUG] LLM response for @{login}:")
+            # print(f"[DEBUG] {response_text[:300]}...")
 
             # Parse numbered reasons - simple extraction
             import re

@@ -90,7 +90,7 @@ st.markdown(
     .reason-text {
         font-size: 0.85rem;
         line-height: 1.4;
-        color: #555;
+            color: #888;
         margin-bottom: 0.3rem;
     }
     .stTextInput > div > div > input {
