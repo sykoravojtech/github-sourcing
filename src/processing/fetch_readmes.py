@@ -2,7 +2,7 @@
 Phase 3: Fetch READMEs for top-ranked users.
 
 This module handles README enrichment for selected users after ranking.
-Called from main.py as Phase 3 of the workflow.
+Called from workflow.py as Phase 3 of the workflow.
 """
 
 import base64

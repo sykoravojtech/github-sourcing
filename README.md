@@ -12,11 +12,18 @@ uv sync
 # Edit config.py to adjust limits, weights, delays, etc.
 
 # 3. Run complete workflow
-python main.py
+uv run python -m src.workflow
 
 # Or customize via command-line
-python main.py --max-pages 10 --top-n 50
+uv run python -m src.workflow -- --max-pages 10 --top-n 50
 ```
+Run the web app:
+
+```bash
+uv run streamlit run src/web_app.py
+```
+
+Then open your browser at: http://localhost:8501
 
 **That's it!** All three phases run automatically.
 
@@ -49,7 +56,7 @@ python main.py --max-pages 10 --top-n 50
 
 ```bash
 # Run everything at once
-python main.py --max-pages 5 --top-n 30
+uv run python -m src.workflow -- --max-pages 5 --top-n 30
 ```
 
 ### Option 2: Manual Steps
@@ -106,19 +113,19 @@ Rank   Score    Login                Followers  Contrib    Stars
 
 ```bash
 # Small test (30 seconds)
-python main.py --max-pages 1 --top-n 5
+uv run python -m src.workflow -- --max-pages 1 --top-n 5
 
 # Medium run (5 minutes)
-python main.py --max-pages 10 --top-n 50
+uv run python -m src.workflow -- --max-pages 10 --top-n 50
 
 # Large run (10 minutes)
-python main.py --max-pages 20 --top-n 100
+uv run python -m src.workflow -- --max-pages 20 --top-n 100
 
 # Fast ranking only (no READMEs)
-python main.py --max-pages 10 --top-n 50 --no-readmes
+uv run python -m src.workflow -- --max-pages 10 --top-n 50 --no-readmes
 
 # Different city
-python main.py --location "location:brno" --top-n 30
+uv run python -m src.workflow -- --location "location:brno" --top-n 30
 ```
 
 ---
@@ -186,7 +193,7 @@ src/
     ├── rank_users.py         # Phase 2: Ranking algorithm
     └── text_processor.py     # Text utilities
 
-main.py                       # Automated workflow orchestrator
+workflow.py                   # Automated workflow orchestrator (use 'uv run python -m src.workflow')
 ```
 
 ---
@@ -230,7 +237,7 @@ uv sync
 echo "GITHUB_API_TOKEN=your_token_here" > .env
 
 # Run
-python main.py
+uv run python -m src.workflow
 ```
 
 ---

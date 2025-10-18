@@ -78,7 +78,7 @@ def build_czech_location_query():
     return " OR ".join(quoted_keywords)
 
 
-# Default search location (can be overridden in main.py)
+# Default search location (can be overridden in workflow.py)
 # Use ALL 33 Czech keywords for broadest search
 # DEFAULT_LOCATION = build_czech_location_query()  # All Czech locations
 DEFAULT_LOCATION = "location:prague"  # Single city (most focused)
@@ -104,7 +104,7 @@ FETCH_READMES = False
 
 # ========== PHASE 2: RANKING CONFIGURATION ==========
 # Number of top-ranked users to select for README enrichment
-# This is the default, can be overridden in main.py with --top-n
+# This is the default, can be overridden in workflow.py with --top-n
 TOP_N_USERS = 20
 
 # Scoring weights (must sum to 1.0)

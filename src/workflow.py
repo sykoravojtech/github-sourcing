@@ -7,7 +7,7 @@ This script runs the complete three-phase process:
 3. Fetch READMEs for top-ranked users
 
 Usage:
-    python main.py [--max-pages N] [--top-n N] [--location QUERY]
+    python src/workflow.py [--max-pages N] [--top-n N] [--location QUERY]
 """
 
 import argparse
@@ -163,19 +163,19 @@ def main():
         epilog="""
 Examples:
   # Quick test: 50 users, top 20 with READMEs
-  python main.py --max-pages 2 --top-n 20
+    python src/workflow.py --max-pages 2 --top-n 20
   
-  # Medium run: 250 users, top 50 with READMEs
-  python main.py --max-pages 10 --top-n 50
+    # Medium run: 250 users, top 50 with READMEs
+    python src/workflow.py --max-pages 10 --top-n 50
   
-  # Large run: 500 users, top 100 with READMEs
-  python main.py --max-pages 20 --top-n 100
+    # Large run: 500 users, top 100 with READMEs
+    python src/workflow.py --max-pages 20 --top-n 100
   
-  # Without READMEs (fast)
-  python main.py --max-pages 10 --top-n 50 --no-readmes
+    # Without READMEs (fast)
+    python src/workflow.py --max-pages 10 --top-n 50 --no-readmes
   
-  # Different location
-  python main.py --location "location:brno" --top-n 20
+    # Different location
+    python src/workflow.py --location "location:brno" --top-n 20
         """,
     )
 
