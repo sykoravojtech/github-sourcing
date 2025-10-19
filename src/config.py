@@ -110,26 +110,37 @@ TOP_N_USERS = 20
 # Scoring weights (must sum to 1.0)
 # Adjust these to change ranking priorities
 SCORING_WEIGHTS = {
-    "contributions": 0.35,  # GitHub contributions in last year
-    "stars": 0.25,  # Total stars across repositories
-    "followers": 0.20,  # Number of followers
-    "repos": 0.10,  # Number of public repositories
-    "activity": 0.10,  # Recent activity (last 30 days)
+    "contributions": 0.25,  # GitHub contributions in last year (12 měsíců)
+    "stars": 0.20,  # Total stars across repositories (dopad projektů)
+    "followers": 0.15,  # Number of followers (počet sledujících)
+    "activity": 0.15,  # Recent activity (last 30 days) (aktuální pulse)
+    "repos": 0.10,  # Number of public repositories (rozsah práce)
+    "trend": 0.15,  # Trend growth/momentum (trendový růst)
 }
 
 # Normalization thresholds for scoring
 # Values at or above threshold get maximum score (100 points)
 SCORING_THRESHOLDS = {
-    "contributions": 1000,  # 1000+ contributions = 100 points
-    "stars": 1000,  # 1000+ stars = 100 points
+    "contributions": 1000,  # 1000+ contributions/year = 100 points
+    "stars": 1000,  # 1000+ stars total = 100 points
     "followers": 1000,  # 1000+ followers = 100 points
     "repos": 50,  # 50+ repos = 100 points
-    "activity_days": 30,  # Activity within 30 days = 100 points
+    "activity_30_days": 15,  # 15+ contributions in last 30 days = 100 points (active)
+    # Trend score thresholds (Oct 2025: Uses contribution calendar + repo activity)
+    "trend_recent_contributions": 50,  # 50+ contributions in 30 days = max recent momentum
+    "trend_quarterly_contributions": 150,  # 150+ contributions in 90 days = max quarterly momentum
+    "trend_active_projects": 3,  # 3+ high-value projects active in 180 days = max project score
+    "trend_recent_projects": 3,  # 3+ projects pushed in 90 days = max recent work
 }
 
 # Minimum contributions required to be included in rankings
 # Users with fewer contributions in the last year will be filtered out
 MIN_CONTRIBUTIONS_REQUIRED = 1  # Set to 0 to include everyone
+
+# Minimum trend score required to be included in rankings
+# Users with trend score of 0 (no activity in last 90 days) will be filtered out
+# This is a red flag for talent sourcing - inactive developers are less likely to be hireable
+MIN_TREND_SCORE_REQUIRED = 0.1  # Set to 0 to include everyone (even inactive users)
 
 # ========== API RATE LIMITING ==========
 # Delay between page requests (seconds)
@@ -209,9 +220,23 @@ FETCH_REPOSITORIES_IN_SEARCH = (
 )
 
 # Pass 2: Batch size for fetching contributions/repos separately
-# GitHub allows up to 100 nodes per query, but 20-50 is safer
-CONTRIBUTIONS_BATCH_SIZE = 25  # Users per batch when fetching contributions
-REPOSITORIES_BATCH_SIZE = 25  # Users per batch when fetching repositories
+# Based on Oct 2025 testing (see docs/BATCH_SIZE_TESTING_RESULTS.md):
+# UPDATE Oct 19: With full contribution calendar (365 days), batch size 20
+# hits GitHub resource limits ~50% of the time (non-deterministic).
+# Reduced to 15 for more reliability with contribution calendar.
+#
+# Previous testing:
+#   20 users/batch = 100% success (WITHOUT contribution calendar details)
+#   15 users/batch = ~95% success (WITH contribution calendar - current)
+#   25 users/batch = 75% success rate (needs retry logic)
+#   30+ users/batch = <50% success rate (not recommended)
+OPTIMAL_BATCH_SIZE = 15  # Reduced from 20 due to contribution calendar complexity
+CONTRIBUTIONS_BATCH_SIZE = (
+    15  # Users per batch when fetching contributions with calendar
+)
+REPOSITORIES_BATCH_SIZE = (
+    25  # Users per batch when fetching repositories (less complex)
+)
 
 # Contribution time window (for Pass 2)
 # GitHub limits to 1 year maximum

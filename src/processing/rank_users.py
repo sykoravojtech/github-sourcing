@@ -11,7 +11,7 @@ from typing import Dict, List
 
 # Add parent directory to path to import config
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-import config
+from src import config
 
 
 def parse_datetime(dt_string):
@@ -29,6 +29,111 @@ def normalize_metric(value, max_value):
     if max_value == 0:
         return 0
     return min(100, (value / max_value) * 100)
+
+
+def calculate_trend_score(user: Dict) -> float:
+    """
+    Calculate trend/momentum score (0-100) based on contribution patterns.
+
+    Uses two data sources:
+    1. Contribution Calendar (60 points) - Daily commit activity over 365 days
+       - Recent momentum (last 30 days): 25 pts
+       - Quarterly momentum (last 90 days): 20 pts
+       - Consistency (activity distribution): 15 pts
+
+    2. Project Momentum (40 points) - Repository activity patterns
+       - Active high-value projects: 25 pts
+       - Recent project work: 15 pts
+
+    Total: 100 points possible
+
+    Note: GitHub API does NOT provide star timestamps, so we cannot track
+    "star growth". We use contribution velocity as the momentum indicator.
+    """
+    # ===== PART 1: CONTRIBUTION MOMENTUM (60 points) =====
+    contrib_collection = user.get("contributionsCollection", {})
+    calendar = contrib_collection.get("contributionCalendar", {})
+    weeks = calendar.get("weeks", [])
+
+    if not weeks:
+        # No contribution data - inactive user
+        return 0.0
+
+    # Extract daily contributions for different time windows
+    all_days = []
+    for week in weeks:
+        for day in week.get("contributionDays", []):
+            all_days.append(
+                {"date": day.get("date"), "count": day.get("contributionCount", 0)}
+            )
+
+    # Sort by date (newest first)
+    all_days.sort(key=lambda d: d["date"], reverse=True)
+
+    # Calculate contribution counts for different periods
+    last_30_days = sum(d["count"] for d in all_days[:30]) if len(all_days) >= 30 else 0
+    last_90_days = sum(d["count"] for d in all_days[:90]) if len(all_days) >= 90 else 0
+    total_365_days = calendar.get("totalContributions", 0)
+
+    # 1a. Recent Momentum (last 30 days) - 25 points max
+    # Threshold: 50+ contributions in 30 days = very active
+    recent_momentum = min(25, (last_30_days / 50) * 25)
+
+    # 1b. Quarterly Momentum (last 90 days) - 20 points max
+    # Threshold: 150+ contributions in 90 days = sustained activity
+    quarterly_momentum = min(20, (last_90_days / 150) * 20)
+
+    # 1c. Consistency - 15 points max
+    # Active days / total days (higher = more consistent)
+    active_days = sum(1 for d in all_days if d["count"] > 0)
+    consistency_ratio = active_days / len(all_days) if all_days else 0
+    consistency_score = consistency_ratio * 15
+
+    contribution_score = recent_momentum + quarterly_momentum + consistency_score
+
+    # ===== PART 2: PROJECT MOMENTUM (40 points) =====
+    repos = user.get("repositories", {}).get("nodes", [])
+    if not repos:
+        # No repos but has contributions? (contributes to others' projects)
+        # Still give them credit for contribution momentum
+        return round(contribution_score, 2)
+
+    now = datetime.now()
+
+    # 2a. Active High-Value Projects - 25 points max
+    # Projects with stars that are still being actively maintained
+    high_value_active = 0
+    for repo in repos:
+        stars = repo.get("stargazerCount", 0)
+        pushed_at = parse_datetime(repo.get("pushedAt"))
+
+        if pushed_at and stars >= 10:  # Has some impact
+            days_since = (now - pushed_at.replace(tzinfo=None)).days
+            if days_since < 180:  # Updated in last 6 months
+                # Weight by stars: more stars = more points
+                high_value_active += min(stars / 100, 1.0)  # Max 1 point per repo
+
+    # Normalize: 3+ high-value active projects = max score
+    high_value_score = min(25, (high_value_active / 3) * 25)
+
+    # 2b. Recent Project Work - 15 points max
+    # How many projects pushed to in last 90 days?
+    recent_projects = 0
+    for repo in repos:
+        pushed_at = parse_datetime(repo.get("pushedAt"))
+        if pushed_at:
+            days_since = (now - pushed_at.replace(tzinfo=None)).days
+            if days_since < 90:
+                recent_projects += 1
+
+    # Normalize: 3+ recent projects = max score
+    recent_work_score = min(15, (recent_projects / 3) * 15)
+
+    project_score = high_value_score + recent_work_score
+
+    # ===== TOTAL TREND SCORE =====
+    total_score = contribution_score + project_score
+    return round(total_score, 2)
 
 
 def calculate_user_score(user: Dict, all_users: List[Dict] = None) -> float:
@@ -66,15 +171,34 @@ def calculate_user_score(user: Dict, all_users: List[Dict] = None) -> float:
     repos_score = min(100, (total_repos / thresholds["repos"]) * 100)
 
     # ===== 5. ACTIVITY LAST 30 DAYS =====
-    has_recent_activity = False
-    for repo in repos:
-        pushed_at = parse_datetime(repo.get("pushedAt"))
-        if pushed_at:
-            days_since = (datetime.now(pushed_at.tzinfo) - pushed_at).days
-            if days_since < 30:
-                has_recent_activity = True
-                break
-    activity_score = 100 if has_recent_activity else 0
+    # Use contribution calendar for precise activity measurement
+    contrib_collection = user.get("contributionsCollection", {})
+    calendar = contrib_collection.get("contributionCalendar", {})
+    weeks = calendar.get("weeks", [])
+
+    last_30_days_contributions = 0
+    if weeks:
+        # Get all days and sort by date (newest first)
+        all_days = []
+        for week in weeks:
+            for day in week.get("contributionDays", []):
+                all_days.append(
+                    {"date": day.get("date"), "count": day.get("contributionCount", 0)}
+                )
+        all_days.sort(key=lambda d: d["date"], reverse=True)
+
+        # Sum last 30 days
+        last_30_days_contributions = (
+            sum(d["count"] for d in all_days[:30]) if len(all_days) >= 30 else 0
+        )
+
+    # Score based on contribution intensity in last 30 days
+    # Threshold: 15+ contributions in 30 days = active (from config)
+    activity_threshold = 15  # Can be made configurable
+    activity_score = min(100, (last_30_days_contributions / activity_threshold) * 100)
+
+    # ===== 6. TREND/MOMENTUM =====
+    trend_score = calculate_trend_score(user)
 
     # ===== WEIGHTED TOTAL (0-100) =====
     total_score = (
@@ -83,6 +207,7 @@ def calculate_user_score(user: Dict, all_users: List[Dict] = None) -> float:
         + stars_score * weights["stars"]
         + repos_score * weights["repos"]
         + activity_score * weights["activity"]
+        + trend_score * weights["trend"]
     )
 
     return round(total_score, 2)
@@ -103,60 +228,77 @@ def rank_users(users: List[Dict], top_n: int = None) -> List[Dict]:
     print(f"🎯 Ranking {len(users)} users...")
     print(f"{'='*60}\n")
 
+    # Deduplicate users by login (can happen with paginated searches)
+    seen_logins = set()
+    unique_users = []
+    duplicates = 0
+
+    for user in users:
+        login = user.get("login")
+        if login and login not in seen_logins:
+            seen_logins.add(login)
+            unique_users.append(user)
+        elif login:
+            duplicates += 1
+
+    if duplicates > 0:
+        print(
+            f"🔍 Removed {duplicates} duplicate users (from paginated search results)"
+        )
+        print(f"📊 Unique users: {len(unique_users)}\n")
+
+    users = unique_users
+
     # Calculate scores
     for user in users:
         user["ranking_score"] = calculate_user_score(user, users)
 
-    # Filter out users with insufficient contributions
+    # Filter out users with insufficient contributions or no recent activity
     active_users = []
-    filtered_count = 0
+    filtered_contributions = 0
+    filtered_inactive = 0
+
     for user in users:
         contributions = (
             user.get("contributionsCollection", {})
             .get("contributionCalendar", {})
             .get("totalContributions", 0)
         )
-        if contributions >= config.MIN_CONTRIBUTIONS_REQUIRED:
-            active_users.append(user)
-        else:
-            filtered_count += 1
+        trend_score = calculate_trend_score(user)
 
-    if filtered_count > 0:
-        print(
-            f"🔍 Filtered out {filtered_count} users with < {config.MIN_CONTRIBUTIONS_REQUIRED} contributions in the last year"
-        )
+        # Filter by contributions
+        if contributions < config.MIN_CONTRIBUTIONS_REQUIRED:
+            filtered_contributions += 1
+            continue
+
+        # Filter by trend (recent activity)
+        if trend_score < config.MIN_TREND_SCORE_REQUIRED:
+            filtered_inactive += 1
+            continue
+
+        active_users.append(user)
+
+    # Print filtering summary
+    total_filtered = filtered_contributions + filtered_inactive
+    if total_filtered > 0:
+        print(f"🔍 Filtering Summary:")
+        if filtered_contributions > 0:
+            print(
+                f"   • {filtered_contributions} users with < {config.MIN_CONTRIBUTIONS_REQUIRED} contributions/year"
+            )
+        if filtered_inactive > 0:
+            print(
+                f"   • {filtered_inactive} users with no recent activity (trend score < {config.MIN_TREND_SCORE_REQUIRED})"
+            )
+            print(f"     (No commits in last 90 days - likely inactive/unavailable)")
+        print(f"   • Total filtered: {total_filtered}/{len(users)}")
         print(f"📊 Active users remaining: {len(active_users)}\n")
 
     # Sort by score (descending)
     ranked = sorted(active_users, key=lambda u: u["ranking_score"], reverse=True)
 
-    # Print top N (from config)
-    display_count = min(config.DISPLAY_TOP_N, len(ranked))
-    print(f"🏆 Top {display_count} Users (Score 0-100):")
-    print(
-        f"{'Rank':<6} {'Score':<8} {'Login':<20} {'Followers':<10} {'Contrib':<10} {'Stars':<8}"
-    )
-    print("-" * config.SEPARATOR_LENGTH)
-
-    for i, user in enumerate(ranked[:display_count], 1):
-        login = user.get("login", "N/A")
-        score = user.get("ranking_score", 0)
-        followers = user.get("followers", {}).get("totalCount", 0)
-        contributions = (
-            user.get("contributionsCollection", {})
-            .get("contributionCalendar", {})
-            .get("totalContributions", 0)
-        )
-        total_stars = sum(
-            r.get("stargazerCount", 0)
-            for r in user.get("repositories", {}).get("nodes", [])
-        )
-
-        print(
-            f"{i:<6} {score:<8} {login:<20} {followers:<10} {contributions:<10} {total_stars:<8}"
-        )
-
-    print(f"\n{'='*60}\n")
+    # Note: Table printing moved to workflow.py for better control
+    # (workflow.py can print top_n users as specified by user)
 
     if top_n:
         return ranked[:top_n]

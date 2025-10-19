@@ -228,7 +228,8 @@ def main():
         st.header("⚙️ Settings")
 
         # Default data path
-        default_data_path = "data/raw/20251018_102552/phase3_top_20_with_readmes.json"
+        # default_data_path = "data/raw/20251018_102552/phase3_top_20_with_readmes.json"
+        default_data_path = "data/raw/20251019_102119/phase3_top_50_with_readmes.json"
 
         data_path = st.text_input(
             "Data file path",

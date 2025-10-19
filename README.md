@@ -69,7 +69,7 @@ python src/data_collection/fetch_users.py
 python src/processing/rank_users.py data/raw/.../phase1_all_users.json 20
 
 # Phase 3: Fetch READMEs
-python src/data_collection/fetch_readmes.py data/raw/.../phase2_ranked_top_20.json
+python src/processing/fetch_readmes.py data/raw/.../phase2_ranked_top_20.json
 ```
 
 ---
