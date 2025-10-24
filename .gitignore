@@ -1,6 +1,15 @@
-data/
 docs/
 
+# 1) Ignore everything under data/ (recursively)
+data/**/*
+
+# 2) Unignore parent folders so Git will traverse into them
+!data/
+!data/raw/
+!data/raw/20251019_102119/
+
+# 3) Unignore the specific file you want
+!data/raw/20251019_102119/phase3_top_50_with_readmes.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
