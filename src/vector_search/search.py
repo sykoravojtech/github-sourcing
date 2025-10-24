@@ -41,20 +41,26 @@ class VectorSearch:
             if groq_api_key:
                 self.groq_client = Groq(api_key=groq_api_key)
                 print(
-                    f"Vector search initialized with {len(users_data)} profiles (LLM reasoning: enabled)"
+                    f"✅ Vector search initialized with {len(users_data)} profiles (LLM reasoning: ENABLED with Groq)"
                 )
+                import sys
+                sys.stdout.flush()
             else:
                 print(
-                    "Warning: GROQ_API_KEY not found, falling back to keyword-based reasoning"
+                    "⚠️ Warning: GROQ_API_KEY not found, falling back to keyword-based reasoning"
                 )
                 self.use_llm_reasoning = False
                 print(
                     f"Vector search initialized with {len(users_data)} profiles (LLM reasoning: disabled)"
                 )
+                import sys
+                sys.stdout.flush()
         else:
             print(
                 f"Vector search initialized with {len(users_data)} profiles (LLM reasoning: disabled)"
             )
+            import sys
+            sys.stdout.flush()
 
     def _generate_llm_reasons(self, user: Dict[str, Any], query: str) -> List[str]:
         """
@@ -67,10 +73,14 @@ class VectorSearch:
         Returns:
             List of 3 HR-focused reasons
         """
+        login = user.get("login", "Unknown")
+        print(f"🤖 [LLM] Generating AI reasons for @{login}...")
+        import sys
+        sys.stdout.flush()
+        
         # Build comprehensive profile text
         profile_parts = []
 
-        login = user.get("login", "Unknown")
         profile_parts.append(f"GitHub Username: @{login}")
 
         if user.get("bio"):

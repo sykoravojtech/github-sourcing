@@ -260,7 +260,18 @@ def main():
         with st.spinner("🔄 Loading search engine..."):
             embedder, search_engine, users_data = load_search_engine(data_path)
 
-        st.success(f"✅ Loaded {len(users_data)} profiles and ready to search!")
+        # Check if LLM reasoning is enabled
+        llm_status = "🤖 AI-Powered" if search_engine.use_llm_reasoning and hasattr(search_engine, 'groq_client') else "🔤 Keyword-based"
+        
+        # Display success message with LLM status
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.success(f"✅ Loaded {len(users_data)} profiles and ready to search!")
+        with col2:
+            if search_engine.use_llm_reasoning and hasattr(search_engine, 'groq_client'):
+                st.info("🤖 AI Mode")
+            else:
+                st.warning("🔤 Keyword Mode")
 
     except FileNotFoundError as e:
         st.error(f"❌ {str(e)}")
