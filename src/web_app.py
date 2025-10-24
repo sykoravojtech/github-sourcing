@@ -3,6 +3,8 @@
 Streamlit Web Interface for GitHub Talent Search
 
 A beautiful web interface for searching GitHub talent using vector embeddings.
+
+uv run streamlit run src/web_app.py
 """
 
 import json

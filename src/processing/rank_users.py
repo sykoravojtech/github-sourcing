@@ -249,11 +249,7 @@ def rank_users(users: List[Dict], top_n: int = None) -> List[Dict]:
 
     users = unique_users
 
-    # Calculate scores
-    for user in users:
-        user["ranking_score"] = calculate_user_score(user, users)
-
-    # Filter out users with insufficient contributions or no recent activity
+    # Filter BEFORE calculating scores (optimization: skip inactive users)
     active_users = []
     filtered_contributions = 0
     filtered_inactive = 0
@@ -264,12 +260,14 @@ def rank_users(users: List[Dict], top_n: int = None) -> List[Dict]:
             .get("contributionCalendar", {})
             .get("totalContributions", 0)
         )
-        trend_score = calculate_trend_score(user)
 
-        # Filter by contributions
+        # Filter by contributions first (cheap check)
         if contributions < config.MIN_CONTRIBUTIONS_REQUIRED:
             filtered_contributions += 1
             continue
+
+        # Calculate trend score only for users who passed first filter
+        trend_score = calculate_trend_score(user)
 
         # Filter by trend (recent activity)
         if trend_score < config.MIN_TREND_SCORE_REQUIRED:
@@ -293,6 +291,11 @@ def rank_users(users: List[Dict], top_n: int = None) -> List[Dict]:
             print(f"     (No commits in last 90 days - likely inactive/unavailable)")
         print(f"   • Total filtered: {total_filtered}/{len(users)}")
         print(f"📊 Active users remaining: {len(active_users)}\n")
+
+    # Calculate scores ONLY for active users (performance optimization)
+    print(f"⚙️ Calculating scores for {len(active_users)} active users...")
+    for user in active_users:
+        user["ranking_score"] = calculate_user_score(user, active_users)
 
     # Sort by score (descending)
     ranked = sorted(active_users, key=lambda u: u["ranking_score"], reverse=True)
