@@ -44,6 +44,7 @@ class VectorSearch:
                     f"✅ Vector search initialized with {len(users_data)} profiles (LLM reasoning: ENABLED with Groq)"
                 )
                 import sys
+
                 sys.stdout.flush()
             else:
                 print(
@@ -54,12 +55,14 @@ class VectorSearch:
                     f"Vector search initialized with {len(users_data)} profiles (LLM reasoning: disabled)"
                 )
                 import sys
+
                 sys.stdout.flush()
         else:
             print(
                 f"Vector search initialized with {len(users_data)} profiles (LLM reasoning: disabled)"
             )
             import sys
+
             sys.stdout.flush()
 
     def _generate_llm_reasons(self, user: Dict[str, Any], query: str) -> List[str]:
@@ -76,8 +79,9 @@ class VectorSearch:
         login = user.get("login", "Unknown")
         print(f"🤖 [LLM] Generating AI reasons for @{login}...")
         import sys
+
         sys.stdout.flush()
-        
+
         # Build comprehensive profile text
         profile_parts = []
 
@@ -180,40 +184,6 @@ Write 3 specific reasons. Each reason should mention a specific repository or te
             else:
                 print(
                     f"Warning: Only extracted {len(reasons)} reasons for @{login}, falling back"
-                )
-                return self._extract_relevant_info_keyword(user, query)
-
-        except Exception as e:
-            print(
-                f"Warning: LLM reasoning failed for @{login} ({type(e).__name__}: {e}), falling back to keyword-based"
-            )
-            return self._extract_relevant_info_keyword(user, query)
-
-        try:
-            # Call Groq API with rate limiting (60 RPM = 1 request per second)
-            time.sleep(1.1)  # Sleep 1.1 seconds to stay under 60 RPM
-
-            completion = self.groq_client.chat.completions.create(
-                model="qwen/qwen3-32b",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,  # Slightly higher for more natural text
-                max_tokens=250,  # Just need a paragraph
-            )
-
-            response_text = completion.choices[0].message.content.strip()
-
-            # Debug: Print the raw response
-            print(f"[DEBUG] LLM response for @{login}:")
-            print(f"[DEBUG] {response_text}")
-
-            # Simple validation - just check we got something substantive
-            if len(response_text) > 30:
-                print(f"[DEBUG] Successfully generated reasoning for @{login}")
-                # Return as a single-item list to match expected format
-                return [response_text]
-            else:
-                print(
-                    f"Warning: LLM returned too-short response for @{login}, falling back"
                 )
                 return self._extract_relevant_info_keyword(user, query)
 
