@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 # Import config first
 from src import config
+from src.data_collection.fetch_readmes import fetch_readmes_for_users
 
 # Use optimized fetch implementatsion (Oct 2025)
 from src.data_collection.fetch_users import (
@@ -29,7 +30,6 @@ from src.data_collection.fetch_users import (
     save_users,
     search_users,
 )
-from src.processing.fetch_readmes import fetch_readmes_for_users
 from src.processing.rank_users import rank_users, save_ranked_users
 
 
@@ -260,7 +260,7 @@ def run_workflow(
     )
     if fetch_readmes:
         print(
-            f"  • Phase 3 (README): {timings.get('phase3', 0):.1f}s - {timings.get('phase3', 0)/duration*100:.1f}%"
+            f"  • Phase 3 (README): {timings.get('phase3', 0):.1f}s ({timings.get('phase3', 0)/60:.1f} min) - {timings.get('phase3', 0)/duration*100:.1f}%"
         )
 
     print(f"\n📄 Output Files:")

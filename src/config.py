@@ -87,7 +87,7 @@ DEFAULT_LOCATION = "location:prague"  # Single city (most focused)
 # ========== PHASE 1: BULK FETCH CONFIGURATION ==========
 # Number of pages to fetch (each page has USERS_PER_PAGE users)
 # Recommended: 2 for testing, 20 for medium, 100+ for production
-MAX_PAGES = 10
+MAX_PAGES = 10  # 10 pages × 100 users per page = 1000 users
 
 # Number of users to fetch per page
 # Note: GitHub API allows max 100, but 25 is more reliable with contributionsCollection
@@ -105,7 +105,7 @@ FETCH_READMES = False
 # ========== PHASE 2: RANKING CONFIGURATION ==========
 # Number of top-ranked users to select for README enrichment
 # This is the default, can be overridden in workflow.py with --top-n
-TOP_N_USERS = 20
+TOP_N_USERS = 1000  # Rank all fetched users
 
 # Scoring weights (must sum to 1.0)
 # Adjust these to change ranking priorities
