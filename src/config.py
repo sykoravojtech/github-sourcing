@@ -200,6 +200,12 @@ USE_EMOJI = True  # Set False for plain text output
 # ========== ADVANCED SETTINGS ==========
 # These generally don't need to be changed
 
+# ========== VECTOR SEARCH / EMBEDDINGS ==========
+# Sentence transformer model for generating profile embeddings
+# all-mpnet-base-v2: Higher quality, slower, more accurate semantic search (recommended)
+# all-MiniLM-L6-v2: Faster, cheaper, CPU-friendly, good quality (lighter alternative)
+EMBEDDING_MODEL = "all-mpnet-base-v2"
+
 # ========== REPOSITORY FILTERING ==========
 # Whether to exclude forked repositories from analysis
 # TRUE = Only original work (recommended for talent sourcing)
@@ -376,6 +382,10 @@ def print_config_summary():
     print(f"  • Fetch pushedAt: {FETCH_PUSHED_AT}")
     print(f"  • Fetch updatedAt: {FETCH_UPDATED_AT}")
     print(f"  • Verbose logging: {VERBOSE}")
+    
+    # Vector Search
+    print("\n🔍 Vector Search / Embeddings:")
+    print(f"  • Embedding model: {EMBEDDING_MODEL}")
 
     print(f"\n{'='*SEPARATOR_LENGTH}\n")
 

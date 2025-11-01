@@ -1,24 +1,31 @@
 """Generate embeddings for GitHub user profiles."""
 
 import json
+import os
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
+# sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from src.config import EMBEDDING_MODEL
+
 
 class ProfileEmbedder:
     """Generate embeddings for GitHub user profiles using README and profile data."""
 
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = None):
         """
         Initialize the embedder with a sentence transformer model.
 
         Args:
             model_name: Name of the sentence transformer model to use.
-                       Default is all-MiniLM-L6-v2 (fast, CPU-friendly, good quality)
+                       If None, uses EMBEDDING_MODEL from config.py
         """
+        if model_name is None:
+            model_name = EMBEDDING_MODEL
         print(f"Loading embedding model: {model_name}...")
         self.model = SentenceTransformer(model_name)
         print("Model loaded successfully!")

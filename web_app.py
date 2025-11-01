@@ -14,8 +14,8 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 import streamlit as st
 
-from vector_search.embeddings import ProfileEmbedder
-from vector_search.search import VectorSearch
+from src.vector_search.embeddings import ProfileEmbedder
+from src.vector_search.search import VectorSearch
 
 # Page configuration
 st.set_page_config(

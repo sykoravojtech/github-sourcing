@@ -13,9 +13,7 @@ import time
 
 import requests
 
-# Add parent directory to path to import config
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-import config
+import src.config as config
 
 
 def get_readme_content(owner, repo_name, verbose=False):
