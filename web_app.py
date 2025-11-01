@@ -59,7 +59,6 @@ st.markdown(
     }
     .rank-badge {
         display: inline-block;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
         font-weight: bold;
         padding: 0.2rem 0.6rem;
@@ -67,6 +66,15 @@ st.markdown(
         font-size: 0.9rem;
         min-width: 30px;
         text-align: center;
+    }
+    .rank-badge-high {
+        background: #10b981;
+    }
+    .rank-badge-medium {
+        background: #f59e0b;
+    }
+    .rank-badge-low {
+        background: #6b7280;
     }
     .candidate-name {
         font-size: 1.1rem;
@@ -140,16 +148,13 @@ def load_search_engine(data_path: str):
 
 
 def format_match_score(score: float) -> str:
-    """Format the match score as a percentage with color."""
-    percentage = score * 100
-    if percentage >= 30:
-        css_class = "match-score-high"
-    elif percentage >= 20:
-        css_class = "match-score-medium"
+    """Return a label and badge class for the match score."""
+    if score >= 0.3:
+        return "Strong match", "rank-badge-high"
+    elif score >= 0.2:
+        return "Good match", "rank-badge-medium"
     else:
-        css_class = "match-score-low"
-
-    return f'<span class="{css_class}">{percentage:.1f}%</span>'
+        return "Possible fit", "rank-badge-low"
 
 
 def display_candidate(
@@ -192,14 +197,19 @@ def display_candidate(
     col_left, col_right = st.columns([0.35, 0.65])
 
     with col_left:
-        # Rank badge and name
+        # Get label and badge color class
+        match_label, badge_class = format_match_score(score)
+        # Rank badge with dynamic color
         st.markdown(
-            f'<span class="rank-badge">#{rank}</span> '
+            f'<span class="rank-badge {badge_class}">#{rank}</span> '
             f'<a href="{profile_url}" target="_blank" class="candidate-name">@{login}</a>',
             unsafe_allow_html=True,
         )
-        # Match score
-        st.markdown(f"**Match:** {format_match_score(score)}", unsafe_allow_html=True)
+        # Optional: show label below name (or comment out for cleaner look)
+        st.markdown(
+            f'<span style="font-size:0.95rem;color:#888;">{match_label}</span>',
+            unsafe_allow_html=True,
+        )
 
     with col_right:
         # Display reasons as numbered list
@@ -252,6 +262,12 @@ def main():
         st.markdown(
             "This tool uses **vector embeddings** and **semantic similarity** "
             "to find GitHub users whose profiles match your search criteria."
+        )
+        st.markdown(
+            "<span style='font-size:0.95rem;'>"
+            "<b>Rank badge colors:</b> 🟢 Strong match, 🟡 Good match, ⚪ Possible fit."
+            "</span>",
+            unsafe_allow_html=True,
         )
         st.markdown("Built with Streamlit, sentence-transformers, and scikit-learn.")
 
