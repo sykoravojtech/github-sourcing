@@ -32,7 +32,7 @@ st.set_page_config(
 )
 
 # Global configuration for predefined tabs
-PREDEFINED_TABS_TOP_K = 3  # Number of results to show in each predefined category tab
+PREDEFINED_TABS_TOP_K = 20  # Number of results to show in each predefined category tab
 
 # Custom CSS for better styling
 st.markdown(
