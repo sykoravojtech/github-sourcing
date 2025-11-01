@@ -178,7 +178,7 @@ Write 3 specific reasons. Each reason should mention a specific repository or te
 
             if len(reasons) >= 2:
                 print(
-                    f"[DEBUG] Successfully extracted {len(reasons)} reasons for @{login}"
+                    f"\t[DEBUG] Successfully extracted {len(reasons)} reasons for @{login}"
                 )
                 return reasons[:3]
             else:

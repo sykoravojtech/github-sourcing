@@ -25,6 +25,9 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
+# Global configuration for predefined tabs
+PREDEFINED_TABS_TOP_K = 3  # Number of results to show in each predefined category tab
+
 # Custom CSS for better styling
 st.markdown(
     """
@@ -159,6 +162,51 @@ def load_search_engine(data_path: str):
     return embedder, search_engine, filtered_users
 
 
+@st.cache_data
+def get_predefined_results(
+    _embedder, _search_engine, query: str, tab_name: str, top_k: int = 3
+):
+    """
+    Get predefined search results with reasons (cached to avoid recomputation).
+
+    Args:
+        _embedder: ProfileEmbedder instance (prefixed with _ to avoid hashing)
+        _search_engine: VectorSearch instance (prefixed with _ to avoid hashing)
+        query: Search query string
+        tab_name: Name of the tab for logging
+        top_k: Number of results to return
+
+    Returns:
+        List of (user, score, reasons) tuples
+    """
+    print(f"\n[INIT] Computing results for '{tab_name}' tab...")
+    query_embedding = _embedder.embed_query(query)
+    results = _search_engine.search(query_embedding, top_k=top_k)
+
+    # Pre-compute reasons for all results to avoid LLM calls during display
+    results_with_reasons = []
+    for user, score in results:
+        reasons = _search_engine._extract_relevant_info(user, query)
+
+        if not reasons:
+            # Fallback reasons
+            reasons = ["Profile content matches search criteria"]
+            if user.get("bio"):
+                bio = user["bio"][:80] + "..." if len(user["bio"]) > 80 else user["bio"]
+                reasons.append(f"Bio: {bio}")
+            repositories = user.get("repositories", {})
+            total_repos = repositories.get("totalCount", 0)
+            if total_repos:
+                reasons.append(
+                    f"Has {total_repos} repositories showing relevant experience"
+                )
+
+        results_with_reasons.append((user, score, reasons))
+
+    print(f"[INIT] ✓ '{tab_name}' tab ready ({len(results_with_reasons)} candidates)")
+    return results_with_reasons
+
+
 def format_match_score(score: float) -> str:
     """Return a label and badge class for the match score."""
     if score >= 0.3:
@@ -167,6 +215,54 @@ def format_match_score(score: float) -> str:
         return "Okay match", "rank-badge-medium"
     else:
         return "Weak match", "rank-badge-low"
+
+
+def display_candidate_with_reasons(
+    rank: int,
+    user: Dict[str, Any],
+    score: float,
+    reasons: List[str],
+):
+    """
+    Display a single candidate with pre-computed reasons (no LLM calls).
+
+    Args:
+        rank: Candidate ranking
+        user: User data dictionary
+        score: Similarity score
+        reasons: Pre-computed list of reasons
+    """
+    login = user.get("login", "Unknown")
+    profile_url = f"https://github.com/{login}"
+
+    # Create 2-column layout: Left for name/rank/score, Right for reasons
+    col_left, col_right = st.columns([0.35, 0.65])
+
+    with col_left:
+        # Get label and badge color class
+        match_label, badge_class = format_match_score(score)
+        # Rank badge with dynamic color
+        st.markdown(
+            f'<span class="rank-badge {badge_class}">#{rank}</span> '
+            f'<a href="{profile_url}" target="_blank" class="candidate-name">@{login}</a>',
+            unsafe_allow_html=True,
+        )
+        # Optional: show label below name (or comment out for cleaner look)
+        st.markdown(
+            f'<span style="font-size:0.95rem;color:#888;">{match_label}</span>',
+            unsafe_allow_html=True,
+        )
+
+    with col_right:
+        # Display reasons as numbered list
+        for i, reason in enumerate(reasons[:3], 1):
+            st.markdown(
+                f'<div class="reason-text">{i}. {reason}</div>',
+                unsafe_allow_html=True,
+            )
+
+    # Subtle separator
+    st.markdown('<div style="margin: 0.3rem 0;"></div>', unsafe_allow_html=True)
 
 
 def display_candidate(
@@ -321,40 +417,113 @@ def main():
         st.error(f"❌ Error loading search engine: {str(e)}")
         return
 
-    # Search interface
+    # Tabs for predefined topics and custom search
     st.markdown("---")
 
-    # Search input
-    query = st.text_input(
-        "🔎 Enter your search query",
-        placeholder="e.g., 'ai, machine learning, langchain' or 'react developer' or 'data visualization'",
-        help="Describe the skills, technologies, or expertise you're looking for",
-        key="search_query",
+    print("\n" + "=" * 60)
+    print("[INIT] Starting predefined tabs initialization...")
+    print("=" * 60)
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+        [
+            "🔍 Custom Search",
+            "💻 Frontend & Web Dev",
+            "🔧 Backend & DevOps",
+            "📊 Data & Analytics",
+            "🤖 AI & ML",
+        ]
     )
 
-    # Search button
-    col1, col2, col3 = st.columns([1, 1, 3])
-    with col1:
-        search_button = st.button("🚀 Search", type="primary", use_container_width=True)
-
-    # Perform search
-    if search_button and query.strip():
-        with st.spinner(f"🔍 Searching for: '{query}'..."):
-            # Generate query embedding
-            query_embedding = embedder.embed_query(query)
-
-            # Perform search
-            results = search_engine.search(query_embedding, top_k=top_k)
-
-        # Display results
-        st.markdown("---")
-        st.markdown(f"## Top {len(results)} Candidates")
-        st.markdown(f"*Searching for:* **{query}**")
-        st.markdown(
-            '<div style="margin-bottom: 0.5rem;"></div>', unsafe_allow_html=True
+    # Tab 1: Custom Search (original functionality)
+    with tab1:
+        # Search input
+        query = st.text_input(
+            "🔎 Enter your search query",
+            placeholder="e.g., 'ai, machine learning, langchain' or 'react developer' or 'data visualization'",
+            help="Describe the skills, technologies, or expertise you're looking for",
+            key="search_query",
         )
 
-        # Add header row for the leaderboard
+        # Search button
+        col1, col2, col3 = st.columns([1, 1, 3])
+        with col1:
+            search_button = st.button(
+                "🚀 Search", type="primary", use_container_width=True
+            )
+
+        # Perform search
+        if search_button and query.strip():
+            with st.spinner(f"🔍 Searching for: '{query}'..."):
+                # Generate query embedding
+                query_embedding = embedder.embed_query(query)
+
+                # Perform search
+                results = search_engine.search(query_embedding, top_k=top_k)
+
+            # Display results
+            st.markdown("---")
+            st.markdown(f"*Top {len(results)} Candidates*")
+            st.markdown(f"*Searching for:* **{query}**")
+            st.markdown(
+                '<div style="margin-bottom: 0.5rem;"></div>', unsafe_allow_html=True
+            )
+
+            # Add header row for the leaderboard
+            header_col1, header_col2 = st.columns([0.35, 0.65])
+            with header_col1:
+                st.markdown("**👤 Candidate & Match Score**")
+            with header_col2:
+                st.markdown("**✨ Why they're a good fit**")
+
+            st.markdown("---")
+
+            if not results:
+                st.warning("No results found. Try a different query.")
+            else:
+                for rank, (user, score) in enumerate(results, 1):
+                    display_candidate(rank, user, score, query, search_engine)
+
+        elif search_button:
+            st.warning("⚠️ Please enter a search query.")
+
+        # Example queries
+        with st.expander("💡 Example Search Queries"):
+            st.markdown(
+                """
+            **Detailed structured queries:**
+            - `Focus: modern web development and UI tools; Main languages: TypeScript, JavaScript; Typical tags: react, nextjs, frontend, ui, design-system, vite, webdev`
+            - `Focus: server technologies, microservices, cloud, DevOps; Main languages: Go, Rust, Java, C#, Shell/Dockerfile/YAML; Typical tags: backend, api, microservices, kubernetes, docker, infra, devops`
+            - `Focus: data analysis, scientific tools, visualization; Main languages: Python, R, SQL, Julia; Typical tags: data, analytics, etl, notebook, visualization, ml, science`
+            - `Focus: artificial intelligence, models, agents, data science; Main languages: Python, Rust; Typical tags: ai, llm, langchain, transformers, mlops, neural-network, data-engineering`
+            
+            **Simple queries:**
+            - `ai, machine learning, langchain`
+            - `rust systems programming`
+            - `react typescript frontend developer`
+            - `data visualization python`
+            - `devops kubernetes docker`
+            - `computer vision opencv`
+            - `natural language processing`
+            """
+            )
+
+    # Tab 2: Frontend & Web Dev
+    with tab2:
+        predefined_query = "Focus: modern web development and UI tools; Main languages: TypeScript, JavaScript; Typical tags: react, nextjs, frontend, ui, design-system, vite, webdev"
+        st.markdown("### 💻 Top Frontend & Web Development Talent")
+        st.markdown(f"*Searching for:* **{predefined_query}**")
+        st.markdown("---")
+
+        # Use cached results - only computes once (including LLM reasons)
+        results = get_predefined_results(
+            embedder,
+            search_engine,
+            predefined_query,
+            "Frontend & Web Dev",
+            top_k=PREDEFINED_TABS_TOP_K,
+        )
+
+        # Add header row
         header_col1, header_col2 = st.columns([0.35, 0.65])
         with header_col1:
             st.markdown("**👤 Candidate & Match Score**")
@@ -363,35 +532,92 @@ def main():
 
         st.markdown("---")
 
-        if not results:
-            st.warning("No results found. Try a different query.")
-        else:
-            for rank, (user, score) in enumerate(results, 1):
-                display_candidate(rank, user, score, query, search_engine)
+        for rank, (user, score, reasons) in enumerate(results, 1):
+            display_candidate_with_reasons(rank, user, score, reasons)
 
-    elif search_button:
-        st.warning("⚠️ Please enter a search query.")
+    # Tab 3: Backend & DevOps
+    with tab3:
+        predefined_query = "Focus: server technologies, microservices, cloud, DevOps; Main languages: Go, Rust, Java, C#, Shell/Dockerfile/YAML; Typical tags: backend, api, microservices, kubernetes, docker, infra, devops"
+        st.markdown("### 🔧 Top Backend & DevOps Talent")
+        st.markdown(f"*Searching for:* **{predefined_query}**")
+        st.markdown("---")
 
-    # Example queries
-    with st.expander("💡 Example Search Queries"):
-        st.markdown(
-            """
-        **Detailed structured queries:**
-        - `Focus: modern web development and UI tools; Main languages: TypeScript, JavaScript; Typical tags: react, nextjs, frontend, ui, design-system, vite, webdev`
-        - `Focus: server technologies, microservices, cloud, DevOps; Main languages: Go, Rust, Java, C#, Shell/Dockerfile/YAML; Typical tags: backend, api, microservices, kubernetes, docker, infra, devops`
-        - `Focus: data analysis, scientific tools, visualization; Main languages: Python, R, SQL, Julia; Typical tags: data, analytics, etl, notebook, visualization, ml, science`
-        - `Focus: artificial intelligence, models, agents, data science; Main languages: Python, Rust; Typical tags: ai, llm, langchain, transformers, mlops, neural-network, data-engineering`
-        
-        **Simple queries:**
-        - `ai, machine learning, langchain`
-        - `rust systems programming`
-        - `react typescript frontend developer`
-        - `data visualization python`
-        - `devops kubernetes docker`
-        - `computer vision opencv`
-        - `natural language processing`
-        """
+        # Use cached results - only computes once (including LLM reasons)
+        results = get_predefined_results(
+            embedder,
+            search_engine,
+            predefined_query,
+            "Backend & DevOps",
+            top_k=PREDEFINED_TABS_TOP_K,
         )
+
+        # Add header row
+        header_col1, header_col2 = st.columns([0.35, 0.65])
+        with header_col1:
+            st.markdown("**👤 Candidate & Match Score**")
+        with header_col2:
+            st.markdown("**✨ Why they're a good fit**")
+
+        st.markdown("---")
+
+        for rank, (user, score, reasons) in enumerate(results, 1):
+            display_candidate_with_reasons(rank, user, score, reasons)
+
+    # Tab 4: Data & Analytics
+    with tab4:
+        predefined_query = "Focus: data analysis, scientific tools, visualization; Main languages: Python, R, SQL, Julia; Typical tags: data, analytics, etl, notebook, visualization, ml, science"
+        st.markdown("### 📊 Top Data & Analytics Talent")
+        st.markdown(f"*Searching for:* **{predefined_query}**")
+        st.markdown("---")
+
+        # Use cached results - only computes once (including LLM reasons)
+        results = get_predefined_results(
+            embedder,
+            search_engine,
+            predefined_query,
+            "Data & Analytics",
+            top_k=PREDEFINED_TABS_TOP_K,
+        )
+
+        # Add header row
+        header_col1, header_col2 = st.columns([0.35, 0.65])
+        with header_col1:
+            st.markdown("**👤 Candidate & Match Score**")
+        with header_col2:
+            st.markdown("**✨ Why they're a good fit**")
+
+        st.markdown("---")
+
+        for rank, (user, score, reasons) in enumerate(results, 1):
+            display_candidate_with_reasons(rank, user, score, reasons)
+
+    # Tab 5: AI & ML
+    with tab5:
+        predefined_query = "Focus: artificial intelligence, models, agents, data science; Main languages: Python, Rust; Typical tags: ai, llm, langchain, transformers, mlops, neural-network, data-engineering"
+        st.markdown("### 🤖 Top AI & Machine Learning Talent")
+        st.markdown(f"*Searching for:* **{predefined_query}**")
+        st.markdown("---")
+
+        # Use cached results - only computes once (including LLM reasons)
+        results = get_predefined_results(
+            embedder,
+            search_engine,
+            predefined_query,
+            "AI & ML",
+            top_k=PREDEFINED_TABS_TOP_K,
+        )
+
+        # Add header row
+        header_col1, header_col2 = st.columns([0.35, 0.65])
+        with header_col1:
+            st.markdown("**👤 Candidate & Match Score**")
+        with header_col2:
+            st.markdown("**✨ Why they're a good fit**")
+
+        st.markdown("---")
+
+        for rank, (user, score, reasons) in enumerate(results, 1):
+            display_candidate_with_reasons(rank, user, score, reasons)
 
 
 if __name__ == "__main__":
