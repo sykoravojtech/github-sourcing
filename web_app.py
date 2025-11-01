@@ -19,8 +19,8 @@ from src.vector_search.search import VectorSearch
 
 # Page configuration
 st.set_page_config(
-    page_title="GitHub Talent Search",
-    page_icon="🔍",
+    page_title="Czech GitHub Talent Search",
+    page_icon="🇨🇿",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -30,13 +30,10 @@ st.markdown(
     """
 <style>
     .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
         text-align: center;
         margin-bottom: 0.3rem;
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        /* no gradient here */
+        /* no text-fill-color here */
     }
     .sub-header {
         text-align: center;
@@ -108,6 +105,21 @@ st.markdown(
     }
     div[data-testid="stHorizontalBlock"] {
         gap: 0.5rem;
+    }
+    .main-header .title {
+        font-size: 2.5rem;
+        font-weight: bold;
+        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .main-header .flag {
+        font-size: 2.5rem;
+        margin-right: .4rem;
+        background: none !important;
+        -webkit-background-clip: initial !important;
+        -webkit-text-fill-color: initial !important;
+        color: inherit;
     }
 </style>
 """,
@@ -228,10 +240,16 @@ def main():
 
     # Header
     st.markdown(
-        '<h1 class="main-header">🔍 GitHub Talent Search</h1>', unsafe_allow_html=True
+        """
+            <h1 class="main-header">
+                <span class="flag">🇨🇿</span>
+                <span class="title">Czech GitHub Talent Search</span>
+            </h1>
+            """,
+        unsafe_allow_html=True,
     )
     st.markdown(
-        '<p class="sub-header">Find the perfect developers using AI-powered semantic search</p>',
+        '<p class="sub-header">Find the best Czech developers using AI-powered semantic search</p>',
         unsafe_allow_html=True,
     )
 
