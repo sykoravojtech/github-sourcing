@@ -32,7 +32,11 @@ st.set_page_config(
 )
 
 # Global configuration for predefined tabs
-PREDEFINED_TABS_TOP_K = 20  # Number of results to show in each predefined category tab
+PREDEFINED_TABS_TOP_K = 50  # Number of results to show in each predefined category tab
+
+# DEFAULT_DATA_PATH = "data/raw/20251018_102552/phase3_top_20_with_readmes.json"
+# DEFAULT_DATA_PATH = "data/raw/20251019_102119/phase3_top_50_with_readmes.json"
+DEFAULT_DATA_PATH = "data/raw/20251101_172357/phase3_top_800_with_readmes.json"
 
 # Custom CSS for better styling
 st.markdown(
@@ -140,12 +144,13 @@ st.markdown(
 def load_search_engine(data_path: str):
     """
     Load and initialize the search engine (cached for performance).
+    Also pre-computes results for predefined tabs.
 
     Args:
         data_path: Path to the Phase 3 JSON file
 
     Returns:
-        Tuple of (embedder, search_engine, users_data)
+        Tuple of (embedder, search_engine, users_data, predefined_results_dict)
     """
     data_path = Path(data_path)
 
@@ -165,52 +170,66 @@ def load_search_engine(data_path: str):
     # Initialize search engine
     search_engine = VectorSearch(embeddings, filtered_users)
 
-    return embedder, search_engine, filtered_users
+    # Pre-compute predefined tab results (only runs ONCE on first load)
+    print("\n" + "=" * 60)
+    print("[INIT] Pre-computing predefined category results...")
+    print("=" * 60)
+
+    predefined_queries = {
+        "Frontend & Web Dev": "Focus: modern web development and UI tools; Main languages: TypeScript, JavaScript; Typical tags: react, nextjs, frontend, ui, design-system, vite, webdev",
+        "Backend & DevOps": "Focus: server technologies, microservices, cloud, DevOps; Main languages: Go, Rust, Java, C#, Shell/Dockerfile/YAML; Typical tags: backend, api, microservices, kubernetes, docker, infra, devops",
+        "Data & Analytics": "Focus: data analysis, scientific tools, visualization; Main languages: Python, R, SQL, Julia; Typical tags: data, analytics, etl, notebook, visualization, ml, science",
+        "AI & ML": "Focus: artificial intelligence, models, agents, data science; Main languages: Python, Rust; Typical tags: ai, llm, langchain, transformers, mlops, neural-network, data-engineering",
+    }
+
+    predefined_results = {}
+    for tab_name, query in predefined_queries.items():
+        print(f"\n[INIT] Computing results for '{tab_name}' tab...")
+        query_embedding = embedder.embed_query(query)
+        results = search_engine.search(query_embedding, top_k=PREDEFINED_TABS_TOP_K)
+
+        # Pre-compute reasons for all results
+        results_with_reasons = []
+        for user, score in results:
+            reasons = search_engine._extract_relevant_info(user, query)
+
+            if not reasons:
+                # Fallback reasons
+                reasons = ["Profile content matches search criteria"]
+                if user.get("bio"):
+                    bio = (
+                        user["bio"][:80] + "..."
+                        if len(user["bio"]) > 80
+                        else user["bio"]
+                    )
+                    reasons.append(f"Bio: {bio}")
+                repositories = user.get("repositories", {})
+                total_repos = repositories.get("totalCount", 0)
+                if total_repos:
+                    reasons.append(
+                        f"Has {total_repos} repositories showing relevant experience"
+                    )
+
+            results_with_reasons.append((user, score, reasons))
+
+        predefined_results[tab_name] = results_with_reasons
+        print(
+            f"[INIT] ✓ '{tab_name}' tab ready ({len(results_with_reasons)} candidates)"
+        )
+
+    print("\n" + "=" * 60)
+    print("[INIT] All predefined tabs initialized!")
+    print("=" * 60 + "\n")
+
+    return embedder, search_engine, filtered_users, predefined_results
 
 
-@st.cache_data
-def get_predefined_results(
-    _embedder, _search_engine, query: str, tab_name: str, top_k: int = 3
-):
-    """
-    Get predefined search results with reasons (cached to avoid recomputation).
-
-    Args:
-        _embedder: ProfileEmbedder instance (prefixed with _ to avoid hashing)
-        _search_engine: VectorSearch instance (prefixed with _ to avoid hashing)
-        query: Search query string
-        tab_name: Name of the tab for logging
-        top_k: Number of results to return
-
-    Returns:
-        List of (user, score, reasons) tuples
-    """
-    print(f"\n[INIT] Computing results for '{tab_name}' tab...")
-    query_embedding = _embedder.embed_query(query)
-    results = _search_engine.search(query_embedding, top_k=top_k)
-
-    # Pre-compute reasons for all results to avoid LLM calls during display
-    results_with_reasons = []
-    for user, score in results:
-        reasons = _search_engine._extract_relevant_info(user, query)
-
-        if not reasons:
-            # Fallback reasons
-            reasons = ["Profile content matches search criteria"]
-            if user.get("bio"):
-                bio = user["bio"][:80] + "..." if len(user["bio"]) > 80 else user["bio"]
-                reasons.append(f"Bio: {bio}")
-            repositories = user.get("repositories", {})
-            total_repos = repositories.get("totalCount", 0)
-            if total_repos:
-                reasons.append(
-                    f"Has {total_repos} repositories showing relevant experience"
-                )
-
-        results_with_reasons.append((user, score, reasons))
-
-    print(f"[INIT] ✓ '{tab_name}' tab ready ({len(results_with_reasons)} candidates)")
-    return results_with_reasons
+# This function is no longer needed - results are pre-computed in load_search_engine
+# Keeping it commented for reference
+# @st.cache_data
+# def get_predefined_results(...):
+#     """DEPRECATED - Results now pre-computed in load_search_engine"""
+#     pass
 
 
 def format_match_score(score: float) -> str:
@@ -360,8 +379,7 @@ def main():
         st.header("⚙️ Settings")
 
         # Default data path
-        # default_data_path = "data/raw/20251018_102552/phase3_top_20_with_readmes.json"
-        default_data_path = "data/raw/20251019_102119/phase3_top_50_with_readmes.json"
+        default_data_path = DEFAULT_DATA_PATH
 
         data_path = st.text_input(
             "Data file path",
@@ -394,7 +412,9 @@ def main():
     # Try to load the search engine
     try:
         with st.spinner("🔄 Loading search engine..."):
-            embedder, search_engine, users_data = load_search_engine(data_path)
+            embedder, search_engine, users_data, predefined_results = (
+                load_search_engine(data_path)
+            )
 
         # Check if LLM reasoning is enabled
         llm_status = (
@@ -425,10 +445,6 @@ def main():
 
     # Tabs for predefined topics and custom search
     st.markdown("---")
-
-    print("\n" + "=" * 60)
-    print("[INIT] Starting predefined tabs initialization...")
-    print("=" * 60)
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs(
         [
@@ -520,14 +536,8 @@ def main():
         st.markdown(f"*Searching for:* **{predefined_query}**")
         st.markdown("---")
 
-        # Use cached results - only computes once (including LLM reasons)
-        results = get_predefined_results(
-            embedder,
-            search_engine,
-            predefined_query,
-            "Frontend & Web Dev",
-            top_k=PREDEFINED_TABS_TOP_K,
-        )
+        # Use pre-computed results (no LLM calls, no recomputation)
+        results = predefined_results["Frontend & Web Dev"]
 
         # Add header row
         header_col1, header_col2 = st.columns([0.35, 0.65])
@@ -548,14 +558,8 @@ def main():
         st.markdown(f"*Searching for:* **{predefined_query}**")
         st.markdown("---")
 
-        # Use cached results - only computes once (including LLM reasons)
-        results = get_predefined_results(
-            embedder,
-            search_engine,
-            predefined_query,
-            "Backend & DevOps",
-            top_k=PREDEFINED_TABS_TOP_K,
-        )
+        # Use pre-computed results (no LLM calls, no recomputation)
+        results = predefined_results["Backend & DevOps"]
 
         # Add header row
         header_col1, header_col2 = st.columns([0.35, 0.65])
@@ -576,14 +580,8 @@ def main():
         st.markdown(f"*Searching for:* **{predefined_query}**")
         st.markdown("---")
 
-        # Use cached results - only computes once (including LLM reasons)
-        results = get_predefined_results(
-            embedder,
-            search_engine,
-            predefined_query,
-            "Data & Analytics",
-            top_k=PREDEFINED_TABS_TOP_K,
-        )
+        # Use pre-computed results (no LLM calls, no recomputation)
+        results = predefined_results["Data & Analytics"]
 
         # Add header row
         header_col1, header_col2 = st.columns([0.35, 0.65])
@@ -604,14 +602,8 @@ def main():
         st.markdown(f"*Searching for:* **{predefined_query}**")
         st.markdown("---")
 
-        # Use cached results - only computes once (including LLM reasons)
-        results = get_predefined_results(
-            embedder,
-            search_engine,
-            predefined_query,
-            "AI & ML",
-            top_k=PREDEFINED_TABS_TOP_K,
-        )
+        # Use pre-computed results (no LLM calls, no recomputation)
+        results = predefined_results["AI & ML"]
 
         # Add header row
         header_col1, header_col2 = st.columns([0.35, 0.65])

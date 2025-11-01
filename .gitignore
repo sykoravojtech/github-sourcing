@@ -7,9 +7,11 @@ data/**/*
 !data/
 !data/raw/
 !data/raw/20251019_102119/
+!data/raw/20251101_172357/
 
 # 3) Unignore the specific file you want
 !data/raw/20251019_102119/phase3_top_50_with_readmes.json
+!data/raw/20251101_172357/phase3_top_800_with_readmes.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
