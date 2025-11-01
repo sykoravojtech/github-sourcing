@@ -74,7 +74,7 @@ st.markdown(
         background: #f59e0b;
     }
     .rank-badge-low {
-        background: #6b7280;
+        background: #ef4444;
     }
     .candidate-name {
         font-size: 1.1rem;
@@ -152,9 +152,9 @@ def format_match_score(score: float) -> str:
     if score >= 0.3:
         return "Strong match", "rank-badge-high"
     elif score >= 0.2:
-        return "Good match", "rank-badge-medium"
+        return "Okay match", "rank-badge-medium"
     else:
-        return "Possible fit", "rank-badge-low"
+        return "Weak match", "rank-badge-low"
 
 
 def display_candidate(
@@ -265,7 +265,7 @@ def main():
         )
         st.markdown(
             "<span style='font-size:0.95rem;'>"
-            "<b>Rank badge colors:</b> 🟢 Strong match, 🟡 Good match, ⚪ Possible fit."
+            "<b>Rank badge colors:</b> 🟢 Strong match, 🟡 Okay match, ❌ Weak match."
             "</span>",
             unsafe_allow_html=True,
         )
